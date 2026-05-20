@@ -104,9 +104,13 @@ def group_metric_families(metrics: tuple[str, ...] | list[str]) -> tuple[MetricF
             grouped[family_name] = {"train": None, "val": None, "raw": []}
             order.append(family_name)
         if role == "train":
-            grouped[family_name]["train"] = metric
+            current = grouped[family_name]["train"]
+            if current is None or metric_role_priority(metric, role) < metric_role_priority(current, role):
+                grouped[family_name]["train"] = metric
         elif role == "val":
-            grouped[family_name]["val"] = metric
+            current = grouped[family_name]["val"]
+            if current is None or metric_role_priority(metric, role) < metric_role_priority(current, role):
+                grouped[family_name]["val"] = metric
         else:
             grouped[family_name]["raw"].append(metric)
 
@@ -126,10 +130,31 @@ def group_metric_families(metrics: tuple[str, ...] | list[str]) -> tuple[MetricF
 
 def split_metric_family(metric: str) -> tuple[str, str]:
     if metric.startswith(TRAIN_PREFIX) and len(metric) > len(TRAIN_PREFIX):
-        return metric[len(TRAIN_PREFIX) :], "train"
+        return strip_logging_suffix(metric[len(TRAIN_PREFIX) :]), "train"
     if metric.startswith(VAL_PREFIX) and len(metric) > len(VAL_PREFIX):
-        return metric[len(VAL_PREFIX) :], "val"
+        return strip_logging_suffix(metric[len(VAL_PREFIX) :]), "val"
     return metric, "raw"
+
+
+def strip_logging_suffix(metric: str) -> str:
+    for suffix in ("_step", "_epoch"):
+        if metric.endswith(suffix) and len(metric) > len(suffix):
+            return metric[: -len(suffix)]
+    return metric
+
+
+def metric_role_priority(metric: str, role: str) -> int:
+    suffix = ""
+    if metric.endswith("_step"):
+        suffix = "_step"
+    elif metric.endswith("_epoch"):
+        suffix = "_epoch"
+
+    if role == "train":
+        return {"_step": 0, "": 1, "_epoch": 2}.get(suffix, 3)
+    if role == "val":
+        return {"": 0, "_epoch": 1, "_step": 2}.get(suffix, 3)
+    return 0
 
 
 def resolve_family(metrics: RunMetrics, family_name: str) -> tuple[tuple[str, str], ...]:

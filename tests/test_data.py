@@ -48,6 +48,16 @@ def test_groups_train_val_metrics_into_families() -> None:
     assert by_name["kl"].val == "val_kl"
 
 
+def test_groups_lightning_step_epoch_suffixes_into_base_family() -> None:
+    families = group_metric_families(("train_loss_epoch", "train_loss_step", "val_loss"))
+
+    by_name = {family.name: family for family in families}
+    assert by_name["loss"].train == "train_loss_step"
+    assert by_name["loss"].val == "val_loss"
+    assert "loss_step" not in by_name
+    assert "loss_epoch" not in by_name
+
+
 def test_resolve_family_handles_missing_train_or_val(tmp_path: Path) -> None:
     path = tmp_path / "metrics.csv"
     path.write_text("step,val_loss\n0,1.0\n")
