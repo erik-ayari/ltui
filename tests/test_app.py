@@ -22,3 +22,24 @@ def test_metric_selector_opens_without_shadowing_textual_query() -> None:
                 assert isinstance(app.screen, SelectorScreen)
 
     asyncio.run(run())
+
+
+def test_axis_toggle_switches_step_epoch() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics = root / "lightning_logs" / "version_0" / "metrics.csv"
+            metrics.parent.mkdir(parents=True)
+            metrics.write_text("epoch,step,train_loss_step,train_loss_epoch,val_loss\n0,10,0.9,,\n0,20,,0.8,\n0,20,,,0.7\n")
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(100, 35)) as pilot:
+                await pilot.pause(0.5)
+
+                assert app.x_axis_mode == "step"
+                await pilot.press("a")
+                await pilot.pause(0.1)
+
+                assert app.x_axis_mode == "epoch"
+
+    asyncio.run(run())

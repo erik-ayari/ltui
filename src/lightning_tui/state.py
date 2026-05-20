@@ -17,6 +17,7 @@ class UiState:
     selected_metrics: tuple[str, ...] = ()
     active_metric: str | None = None
     grouped_mode: bool = True
+    x_axis_mode: str = "step"
     smoothing: bool = False
     log_x: bool = False
     log_y: bool = False
@@ -41,6 +42,7 @@ def load_state(root: str | Path) -> UiState | None:
         selected_metrics=tuple(data.get("selected_metrics", ())),
         active_metric=data.get("active_metric"),
         grouped_mode=bool(data.get("grouped_mode", True)),
+        x_axis_mode=valid_x_axis_mode(data.get("x_axis_mode", "step")),
         smoothing=bool(data.get("smoothing", False)),
         log_x=bool(data.get("log_x", False)),
         log_y=bool(data.get("log_y", False)),
@@ -68,7 +70,14 @@ def valid_state(saved: UiState, runs: list[RunVersion], metric_choices: tuple[st
         selected_metrics=selected_metrics,
         active_metric=active_metric,
         grouped_mode=saved.grouped_mode,
+        x_axis_mode=valid_x_axis_mode(saved.x_axis_mode),
         smoothing=saved.smoothing,
         log_x=saved.log_x,
         log_y=saved.log_y,
     )
+
+
+def valid_x_axis_mode(value: object) -> str:
+    if value in {"step", "epoch"}:
+        return str(value)
+    return "step"

@@ -13,7 +13,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-from .data import RunMetrics, load_run_metrics, metric_series, resolve_family
+from .data import AxisMode, RunMetrics, load_run_metrics, metric_series, resolve_family, resolve_x_axis
 from .discovery import RunVersion, discover_runs
 from .plotting import PlotCurve, render_plot
 from .state import UiState, load_state, save_state, valid_state
@@ -186,6 +186,7 @@ class LightningTuiApp(App[None]):
         Binding("p", "previous_metric", "Previous metric"),
         Binding("c", "toggle_compare", "Compare"),
         Binding("g", "toggle_grouped", "Grouped"),
+        Binding("a", "toggle_x_axis", "X axis"),
         Binding("s", "toggle_smoothing", "Smoothing"),
         Binding("x", "toggle_log_x", "Log x"),
         Binding("y", "toggle_log_y", "Log y"),
@@ -202,6 +203,7 @@ class LightningTuiApp(App[None]):
         self.selected_metrics: list[str] = []
         self.active_metric_index = 0
         self.grouped_mode = True
+        self.x_axis_mode: AxisMode = "step"
         self.smoothing = False
         self.log_x = False
         self.log_y = False
@@ -217,7 +219,7 @@ class LightningTuiApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one("#footer", Static).update(
-            "m metrics  r runs  / search in selector  n/p metric  c compare  g group  s smooth  x/y log  space pause  R rescan  q quit"
+            "m metrics  r runs  / search  n/p metric  c compare  g group  a axis  s smooth  x/y log  space pause  R rescan  q quit"
         )
         asyncio.create_task(self.refresh_snapshot(initial=True))
         self.set_interval(1.5, self.schedule_live_refresh)
@@ -266,6 +268,7 @@ class LightningTuiApp(App[None]):
             saved = load_state(self.root)
             if saved is not None:
                 self.grouped_mode = saved.grouped_mode
+                self.x_axis_mode = saved.x_axis_mode
                 self.smoothing = saved.smoothing
                 self.log_x = saved.log_x
                 self.log_y = saved.log_y
@@ -337,7 +340,7 @@ class LightningTuiApp(App[None]):
         live = "paused" if self.paused else "live"
         header.update(
             f"runs: {run_text}\n"
-            f"metric: {self.active_metric() or 'none'}  mode: {mode}/{grouped}  status: {status_text}/{live}  smooth: {onoff(self.smoothing)}  log-x: {onoff(self.log_x)}  log-y: {onoff(self.log_y)}\n"
+            f"metric: {self.active_metric() or 'none'}  mode: {mode}/{grouped}  x-axis: {self.current_x_axis()}  status: {status_text}/{live}  smooth: {onoff(self.smoothing)}  log-x: {onoff(self.log_x)}  log-y: {onoff(self.log_y)}\n"
             f"{self.status_message}"
         )
 
@@ -363,9 +366,13 @@ class LightningTuiApp(App[None]):
             if metrics is None or run is None:
                 continue
             color = PALETTE[run_index % len(PALETTE)]
-            metric_roles = resolve_family(metrics, active_metric) if self.grouped_mode else ((active_metric, "raw"),)
+            metric_roles = (
+                resolve_family(metrics, active_metric, self.x_axis_mode)
+                if self.grouped_mode
+                else ((active_metric, "raw"),)
+            )
             for metric_name, role in metric_roles:
-                series = metric_series(metrics, metric_name)
+                series = metric_series(metrics, metric_name, self.x_axis_mode)
                 if not series.x:
                     continue
                 label = metric_name if not self.compare_mode else f"{run.display_name} {metric_name}"
@@ -419,8 +426,10 @@ class LightningTuiApp(App[None]):
         axes: list[str] = []
         for run_path in self.selected_run_paths:
             metrics = self.metrics_cache.get(run_path)
-            if metrics is not None and metrics.x_axis not in axes:
-                axes.append(metrics.x_axis)
+            if metrics is not None:
+                axis = resolve_x_axis(metrics.frame, self.x_axis_mode)
+                if axis not in axes:
+                    axes.append(axis)
         return axes[0] if len(axes) == 1 else "x"
 
     def active_metric(self) -> str | None:
@@ -447,6 +456,7 @@ class LightningTuiApp(App[None]):
                 selected_metrics=tuple(self.selected_metrics),
                 active_metric=self.active_metric(),
                 grouped_mode=self.grouped_mode,
+                x_axis_mode=self.x_axis_mode,
                 smoothing=self.smoothing,
                 log_x=self.log_x,
                 log_y=self.log_y,
@@ -522,6 +532,11 @@ class LightningTuiApp(App[None]):
         if not self.selected_metrics and choices:
             self.selected_metrics = [self.default_metric_choice(choices)]
         self.active_metric_index = 0
+        self.render_current()
+
+    def action_toggle_x_axis(self) -> None:
+        self.x_axis_mode = "epoch" if self.x_axis_mode == "step" else "step"
+        self.status_message = f"x-axis: {self.x_axis_mode}"
         self.render_current()
 
     def action_toggle_smoothing(self) -> None:

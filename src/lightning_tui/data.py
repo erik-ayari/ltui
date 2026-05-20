@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
@@ -11,6 +12,7 @@ EPOCH_COLUMN = "epoch"
 ROW_INDEX_AXIS = "row"
 TRAIN_PREFIX = "train_"
 VAL_PREFIX = "val_"
+AxisMode = Literal["step", "epoch", "row"]
 
 
 @dataclass(frozen=True)
@@ -19,13 +21,17 @@ class MetricFamily:
     train: str | None = None
     val: str | None = None
     raw: tuple[str, ...] = ()
+    train_variants: tuple[str, ...] = ()
+    val_variants: tuple[str, ...] = ()
 
-    def metric_names(self) -> tuple[tuple[str, str], ...]:
+    def metric_names(self, x_axis: AxisMode = STEP_COLUMN) -> tuple[tuple[str, str], ...]:
         metrics: list[tuple[str, str]] = []
-        if self.train is not None:
-            metrics.append((self.train, "train"))
-        if self.val is not None:
-            metrics.append((self.val, "val"))
+        train = choose_metric_variant(self.train_variants, "train", x_axis)
+        val = choose_metric_variant(self.val_variants, "val", x_axis)
+        if train is not None:
+            metrics.append((train, "train"))
+        if val is not None:
+            metrics.append((val, "val"))
         metrics.extend((metric, "raw") for metric in self.raw)
         return tuple(metrics)
 
@@ -95,34 +101,34 @@ def numeric_metric_names(frame: pd.DataFrame) -> tuple[str, ...]:
 
 
 def group_metric_families(metrics: tuple[str, ...] | list[str]) -> tuple[MetricFamily, ...]:
-    grouped: dict[str, dict[str, object]] = {}
+    grouped: dict[str, dict[str, list[str]]] = {}
     order: list[str] = []
 
     for metric in metrics:
         family_name, role = split_metric_family(metric)
         if family_name not in grouped:
-            grouped[family_name] = {"train": None, "val": None, "raw": []}
+            grouped[family_name] = {"train": [], "val": [], "raw": []}
             order.append(family_name)
         if role == "train":
-            current = grouped[family_name]["train"]
-            if current is None or metric_role_priority(metric, role) < metric_role_priority(current, role):
-                grouped[family_name]["train"] = metric
+            grouped[family_name]["train"].append(metric)
         elif role == "val":
-            current = grouped[family_name]["val"]
-            if current is None or metric_role_priority(metric, role) < metric_role_priority(current, role):
-                grouped[family_name]["val"] = metric
+            grouped[family_name]["val"].append(metric)
         else:
             grouped[family_name]["raw"].append(metric)
 
     families: list[MetricFamily] = []
     for family_name in order:
         item = grouped[family_name]
+        train_variants = tuple(item["train"])
+        val_variants = tuple(item["val"])
         families.append(
             MetricFamily(
                 name=family_name,
-                train=item["train"],
-                val=item["val"],
+                train=choose_metric_variant(train_variants, "train", STEP_COLUMN),
+                val=choose_metric_variant(val_variants, "val", STEP_COLUMN),
                 raw=tuple(item["raw"]),
+                train_variants=train_variants,
+                val_variants=val_variants,
             )
         )
     return tuple(families)
@@ -143,13 +149,21 @@ def strip_logging_suffix(metric: str) -> str:
     return metric
 
 
-def metric_role_priority(metric: str, role: str) -> int:
+def choose_metric_variant(metrics: tuple[str, ...], role: str, x_axis: AxisMode) -> str | None:
+    if not metrics:
+        return None
+    return min(metrics, key=lambda metric: metric_role_priority(metric, role, x_axis))
+
+
+def metric_role_priority(metric: str, role: str, x_axis: AxisMode) -> int:
     suffix = ""
     if metric.endswith("_step"):
         suffix = "_step"
     elif metric.endswith("_epoch"):
         suffix = "_epoch"
 
+    if x_axis == EPOCH_COLUMN:
+        return {"_epoch": 0, "": 1, "_step": 2}.get(suffix, 3)
     if role == "train":
         return {"_step": 0, "": 1, "_epoch": 2}.get(suffix, 3)
     if role == "val":
@@ -157,36 +171,51 @@ def metric_role_priority(metric: str, role: str) -> int:
     return 0
 
 
-def resolve_family(metrics: RunMetrics, family_name: str) -> tuple[tuple[str, str], ...]:
+def resolve_family(
+    metrics: RunMetrics,
+    family_name: str,
+    x_axis: AxisMode = STEP_COLUMN,
+) -> tuple[tuple[str, str], ...]:
     for family in metrics.families:
         if family.name == family_name:
-            return family.metric_names()
+            return family.metric_names(x_axis)
     if family_name in metrics.metric_names:
         return ((family_name, "raw"),)
     return ()
 
 
-def metric_series(metrics: RunMetrics, metric_name: str) -> MetricSeries:
+def metric_series(metrics: RunMetrics, metric_name: str, x_axis: AxisMode | None = None) -> MetricSeries:
     frame = metrics.frame
     if metric_name not in frame.columns:
         return MetricSeries(metric_name, metrics.x_axis, (), ())
 
+    resolved_x_axis = resolve_x_axis(frame, x_axis or metrics.x_axis)
     y = pd.to_numeric(frame[metric_name], errors="coerce")
-    if metrics.x_axis == ROW_INDEX_AXIS:
+    if resolved_x_axis == ROW_INDEX_AXIS:
         x = pd.Series(range(len(frame)), dtype="float64")
     else:
-        x = pd.to_numeric(frame[metrics.x_axis], errors="coerce")
+        x = pd.to_numeric(frame[resolved_x_axis], errors="coerce")
 
     series = pd.DataFrame({"x": x, "y": y}).dropna(subset=["y"])
-    if metrics.x_axis != ROW_INDEX_AXIS:
+    if resolved_x_axis != ROW_INDEX_AXIS:
         series = series.dropna(subset=["x"])
     series = series.sort_values("x", kind="mergesort")
     return MetricSeries(
         metric_name=metric_name,
-        x_axis=metrics.x_axis,
+        x_axis=resolved_x_axis,
         x=tuple(float(value) for value in series["x"].tolist()),
         y=tuple(float(value) for value in series["y"].tolist()),
     )
+
+
+def resolve_x_axis(frame: pd.DataFrame, preferred: AxisMode) -> AxisMode:
+    if preferred != ROW_INDEX_AXIS and has_numeric_values(frame, preferred):
+        return preferred
+    if has_numeric_values(frame, STEP_COLUMN):
+        return STEP_COLUMN
+    if has_numeric_values(frame, EPOCH_COLUMN):
+        return EPOCH_COLUMN
+    return ROW_INDEX_AXIS
 
 
 def has_numeric_values(frame: pd.DataFrame, column: str) -> bool:

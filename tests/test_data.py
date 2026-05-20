@@ -3,7 +3,9 @@ from pathlib import Path
 import pandas as pd
 
 from lightning_tui.data import (
+    EPOCH_COLUMN,
     ROW_INDEX_AXIS,
+    STEP_COLUMN,
     group_metric_families,
     infer_x_axis,
     load_run_metrics,
@@ -54,8 +56,31 @@ def test_groups_lightning_step_epoch_suffixes_into_base_family() -> None:
     by_name = {family.name: family for family in families}
     assert by_name["loss"].train == "train_loss_step"
     assert by_name["loss"].val == "val_loss"
+    assert set(by_name["loss"].train_variants) == {"train_loss_epoch", "train_loss_step"}
     assert "loss_step" not in by_name
     assert "loss_epoch" not in by_name
+
+
+def test_resolve_family_switches_train_step_epoch_variant(tmp_path: Path) -> None:
+    path = tmp_path / "metrics.csv"
+    path.write_text("epoch,step,train_loss_step,train_loss_epoch,val_loss\n0,10,0.9,,\n0,20,,0.8,\n0,20,,,0.7\n")
+
+    metrics = load_run_metrics(path)
+
+    assert resolve_family(metrics, "loss", STEP_COLUMN) == (("train_loss_step", "train"), ("val_loss", "val"))
+    assert resolve_family(metrics, "loss", EPOCH_COLUMN) == (("train_loss_epoch", "train"), ("val_loss", "val"))
+
+
+def test_metric_series_uses_requested_x_axis_for_validation_alignment(tmp_path: Path) -> None:
+    path = tmp_path / "metrics.csv"
+    path.write_text("epoch,step,train_loss_step,val_loss\n0,10,0.9,\n0,20,0.8,\n0,20,,0.7\n")
+
+    metrics = load_run_metrics(path)
+    step_series = metric_series(metrics, "val_loss", STEP_COLUMN)
+    epoch_series = metric_series(metrics, "val_loss", EPOCH_COLUMN)
+
+    assert step_series.x == (20.0,)
+    assert epoch_series.x == (0.0,)
 
 
 def test_resolve_family_handles_missing_train_or_val(tmp_path: Path) -> None:

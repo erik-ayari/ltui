@@ -77,6 +77,7 @@ n       next selected metric/family
 p       previous selected metric/family
 c       toggle compare mode
 g       toggle grouped train/val metric-family mode
+a       toggle x-axis between step and epoch
 s       toggle smoothing
 x       toggle log-x
 y       toggle log-y
@@ -84,13 +85,14 @@ R       force rescan
 q       quit
 ```
 
-Grouped mode is enabled by default. `train_loss` and `val_loss` appear as family `loss`; selecting `loss` plots whichever sides are available.
+Grouped mode is enabled by default. `train_loss_step`, `train_loss_epoch`, and `val_loss` appear as family `loss`; selecting `loss` plots whichever train/val sides are available. Use `a` to switch the x-axis between step and epoch. On the step axis, validation epoch metrics use the `step` value from their CSV row, which aligns them to the training step where validation was logged.
 
 ## Behavior
 
 - Preferred x-axis: `step`
 - Fallback x-axis: `epoch`
 - Final fallback: row index
+- X-axis can be toggled between `step` and `epoch`
 - Metric columns: numeric columns except `step` and `epoch`
 - Rows with `NaN` for the selected metric are dropped
 - Points are sorted by x-axis before plotting
