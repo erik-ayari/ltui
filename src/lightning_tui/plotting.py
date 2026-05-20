@@ -21,6 +21,14 @@ class PlotResult:
     status_messages: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PlotBounds:
+    x_left: float
+    x_right: float
+    y_lower: float
+    y_upper: float
+
+
 def render_plot(
     curves: list[PlotCurve],
     *,
@@ -57,6 +65,7 @@ def render_plot(
             text += "\n" + " | ".join(messages)
         return PlotResult(text=text, status_messages=tuple(messages))
 
+    bounds = plot_bounds(prepared, x_min=None if log_x else x_min)
     plt.clear_figure()
     plt.plotsize(max(width, 30), max(height, 8))
     plt.grid(True, True)
@@ -66,12 +75,12 @@ def render_plot(
         plt.xlabel(f"log10({x_label})" if log_x else x_label)
     if y_label:
         plt.ylabel(f"log10({y_label})" if log_y else y_label)
-    if x_min is not None and not log_x:
-        plt.xlim(left=x_min)
+    plt.xlim(left=bounds.x_left, right=bounds.x_right)
+    plt.ylim(lower=bounds.y_lower, upper=bounds.y_upper)
 
     for curve in prepared:
         if curve.role == "val":
-            plot_dashed(curve)
+            plot_dashed(curve, bounds, width)
         else:
             plt.plot(curve.x, curve.y, label=curve.label, color=curve.color, marker="braille")
 
@@ -127,23 +136,85 @@ def smooth_values(values: list[float], alpha: float = 0.2) -> list[float]:
     return smoothed
 
 
-def plot_dashed(curve: PlotCurve) -> None:
-    label = curve.label
+def plot_bounds(curves: list[PlotCurve], x_min: float | None = None) -> PlotBounds:
+    x_values = [value for curve in curves for value in curve.x]
+    y_values = [value for curve in curves for value in curve.y]
+    x_left = min(x_values)
+    x_right = max(x_values)
+    if x_min is not None:
+        x_left = x_min
+    else:
+        x_pad = axis_padding(x_left, x_right)
+        x_left -= x_pad
+        x_right += x_pad
+
+    if x_right <= x_left:
+        x_right = x_left + 1
+    elif x_min is not None:
+        x_right += axis_padding(x_left, x_right)
+
+    y_lower = min(y_values)
+    y_upper = max(y_values)
+    y_pad = axis_padding(y_lower, y_upper)
+    return PlotBounds(
+        x_left=x_left,
+        x_right=x_right,
+        y_lower=y_lower - y_pad,
+        y_upper=y_upper + y_pad,
+    )
+
+
+def axis_padding(lower: float, upper: float) -> float:
+    span = upper - lower
+    if span > 0:
+        return span * 0.03
+    magnitude = max(abs(lower), abs(upper), 1.0)
+    return magnitude * 0.5
+
+
+def plot_dashed(curve: PlotCurve, bounds: PlotBounds, width: int) -> None:
     if len(curve.x) < 3:
-        plt.plot(curve.x, curve.y, label=label, color=curve.color, marker="dot")
+        plt.scatter(curve.x, curve.y, label=curve.label, color=curve.color, marker="dot")
         return
 
-    first = True
-    for start in range(0, len(curve.x), 4):
-        x_segment = curve.x[start : start + 2]
-        y_segment = curve.y[start : start + 2]
+    plt.scatter(curve.x, curve.y, label=curve.label, color=curve.color, marker="dot")
+    for x_segment, y_segment in dashed_segments(curve, bounds, width):
         if len(x_segment) < 2:
             continue
         plt.plot(
             x_segment,
             y_segment,
-            label=label if first else None,
+            label=None,
             color=curve.color,
-            marker="braille",
+            marker="dot",
         )
-        first = False
+
+
+def dashed_segments(curve: PlotCurve, bounds: PlotBounds, width: int) -> list[tuple[tuple[float, ...], tuple[float, ...]]]:
+    plot_width = max(width, 12)
+    span = bounds.x_right - bounds.x_left
+    if span <= 0:
+        return [(curve.x, curve.y)]
+
+    segments: list[tuple[list[float], list[float]]] = []
+    current_x: list[float] = []
+    current_y: list[float] = []
+    previous_column: int | None = None
+
+    for x, y in zip(curve.x, curve.y, strict=False):
+        column = int((x - bounds.x_left) / span * (plot_width - 1))
+        keep = column % 8 < 4
+        contiguous = previous_column is None or column - previous_column <= 1
+        if keep and contiguous:
+            current_x.append(x)
+            current_y.append(y)
+        else:
+            if current_x:
+                segments.append((current_x, current_y))
+            current_x = [x] if keep else []
+            current_y = [y] if keep else []
+        previous_column = column
+
+    if current_x:
+        segments.append((current_x, current_y))
+    return [(tuple(x_segment), tuple(y_segment)) for x_segment, y_segment in segments]
