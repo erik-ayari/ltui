@@ -533,6 +533,7 @@ class LightningTuiApp(App[None]):
                         color=color,
                         role=role,
                         run_label=run.display_name,
+                        run_status=run.status,
                         style_label=self.style_label(metric_name, role),
                     )
                 )

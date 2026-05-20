@@ -14,6 +14,7 @@ class PlotCurve:
     color: str = "blue"
     role: str = "raw"
     run_label: str | None = None
+    run_status: str | None = None
     style_label: str | None = None
 
 
@@ -29,6 +30,13 @@ class PlotBounds:
     x_right: float
     y_lower: float
     y_upper: float
+
+
+@dataclass(frozen=True)
+class LegendEntry:
+    label: str
+    color: str
+    active: bool = False
 
 
 def render_plot(
@@ -90,9 +98,10 @@ def render_plot(
             plot_val(curve)
         else:
             plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="braille")
-    draw_legend_entries(prepared, bounds, dark_mode)
+    legend_entries = draw_legend_entries(prepared, bounds, dark_mode)
 
-    return PlotResult(text=plt.build(), status_messages=tuple(messages))
+    text = color_active_run_labels(plt.build(), legend_entries)
+    return PlotResult(text=text, status_messages=tuple(messages))
 
 
 def prepare_curve(
@@ -130,6 +139,7 @@ def prepare_curve(
             color=curve.color,
             role=curve.role,
             run_label=curve.run_label,
+            run_status=curve.run_status,
             style_label=curve.style_label,
         ),
         dropped_x,
@@ -212,30 +222,38 @@ def plot_val(curve: PlotCurve) -> None:
     plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="dot")
 
 
-def draw_legend_entries(curves: list[PlotCurve], bounds: PlotBounds, dark_mode: bool) -> None:
+def draw_legend_entries(curves: list[PlotCurve], bounds: PlotBounds, dark_mode: bool) -> list[LegendEntry]:
     x = bounds.x_left
     y = bounds.y_upper
-    run_labels = run_legend_entries(curves)
+    entries = run_legend_entries(curves)
     neutral = "white" if dark_mode else "black"
 
-    for label, color in run_labels:
-        plt.plot([x], [y], label=label, color=color, marker="dot")
+    for entry in entries:
+        plt.plot([x], [y], label=entry.label, color=entry.color, marker="dot")
     if any(curve.style_label == "train" for curve in curves):
         plt.plot([x], [y], label="train", color=neutral, marker="braille")
     if any(curve.style_label == "val" for curve in curves):
         plt.plot([x], [y], label="val", color=neutral, marker="dot")
+    return entries
 
 
-def run_legend_entries(curves: list[PlotCurve]) -> list[tuple[str, str]]:
+def run_legend_entries(curves: list[PlotCurve]) -> list[LegendEntry]:
     run_count = len({curve.run_label for curve in curves if curve.run_label is not None})
     if run_count <= 1:
         return []
 
-    entries: list[tuple[str, str]] = []
+    entries: list[LegendEntry] = []
     seen: set[str] = set()
     for curve in curves:
         if curve.run_label is None or curve.run_label in seen:
             continue
-        entries.append((curve.run_label, curve.color))
+        entries.append(LegendEntry(curve.run_label, curve.color, curve.run_status == "active"))
         seen.add(curve.run_label)
     return entries
+
+
+def color_active_run_labels(text: str, entries: list[LegendEntry]) -> str:
+    for entry in entries:
+        if entry.active:
+            text = text.replace(entry.label, f"\033[38;5;10m{entry.label}\033[39m", 1)
+    return text

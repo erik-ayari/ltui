@@ -3,8 +3,10 @@ from unittest.mock import patch
 import pytest
 
 from lightning_tui.plotting import (
+    LegendEntry,
     PlotBounds,
     PlotCurve,
+    color_active_run_labels,
     draw_legend_entries,
     integer_ticks,
     plot_val,
@@ -80,14 +82,23 @@ def test_val_curve_uses_connected_dotted_line() -> None:
 
 def test_custom_legend_entries_use_run_colors_then_neutral_styles() -> None:
     curves = [
-        PlotCurve("run_a train", (0.0,), (1.0,), color="blue", role="train", run_label="run_a", style_label="train"),
-        PlotCurve("run_a val", (0.0,), (0.8,), color="blue", role="val", run_label="run_a", style_label="val"),
-        PlotCurve("run_b train", (0.0,), (0.9,), color="red", role="train", run_label="run_b", style_label="train"),
+        PlotCurve(
+            "run_a train",
+            (0.0,),
+            (1.0,),
+            color="blue",
+            role="train",
+            run_label="run_a",
+            run_status="active",
+            style_label="train",
+        ),
+        PlotCurve("run_a val", (0.0,), (0.8,), color="blue", role="val", run_label="run_a", run_status="active", style_label="val"),
+        PlotCurve("run_b train", (0.0,), (0.9,), color="red", role="train", run_label="run_b", run_status="stale", style_label="train"),
     ]
     bounds = PlotBounds(x_left=0, x_right=10, y_lower=0, y_upper=1)
 
     with patch("lightning_tui.plotting.plt.plot") as plot:
-        draw_legend_entries(curves, bounds, dark_mode=True)
+        entries = draw_legend_entries(curves, bounds, dark_mode=True)
 
     labels = [call.kwargs["label"] for call in plot.call_args_list]
     colors = [call.kwargs["color"] for call in plot.call_args_list]
@@ -95,3 +106,12 @@ def test_custom_legend_entries_use_run_colors_then_neutral_styles() -> None:
     assert labels == ["run_a", "run_b", "train", "val"]
     assert colors == ["blue", "red", "white", "white"]
     assert markers == ["dot", "dot", "braille", "dot"]
+    assert entries == [LegendEntry("run_a", "blue", True), LegendEntry("run_b", "red", False)]
+
+
+def test_active_run_labels_are_colored_green_after_render() -> None:
+    text = "run_a run_b run_a"
+
+    colored = color_active_run_labels(text, [LegendEntry("run_a", "blue", True), LegendEntry("run_b", "red", False)])
+
+    assert colored == "\033[38;5;10mrun_a\033[39m run_b run_a"
