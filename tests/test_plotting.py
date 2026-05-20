@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lightning_tui.plotting import PlotBounds, PlotCurve, dashed_segments, prepare_curve, render_plot
+from lightning_tui.plotting import PlotCurve, plot_val, prepare_curve, render_plot
 
 
 def test_log_scaling_drops_nonpositive_values() -> None:
@@ -27,11 +27,10 @@ def test_render_plot_can_force_x_axis_to_zero() -> None:
     ylim.assert_called_once()
 
 
-def test_dashed_segments_use_screen_columns() -> None:
-    curve = PlotCurve(label="val", x=tuple(float(value) for value in range(32)), y=tuple(1.0 for value in range(32)))
-    bounds = PlotBounds(x_left=0, x_right=31, y_lower=0, y_upper=2)
+def test_val_curve_uses_connected_dotted_line() -> None:
+    curve = PlotCurve(label="val", x=(1.0, 10.0, 20.0), y=(0.9, 0.7, 0.6), role="val")
 
-    segments = dashed_segments(curve, bounds, width=32)
+    with patch("lightning_tui.plotting.plt.plot") as plot:
+        plot_val(curve)
 
-    assert len(segments) > 1
-    assert all(len(x_segment) <= 4 for x_segment, y_segment in segments)
+    plot.assert_called_once_with(curve.x, curve.y, label="val", color="blue", marker="dot")

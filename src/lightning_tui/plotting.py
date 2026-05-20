@@ -80,7 +80,7 @@ def render_plot(
 
     for curve in prepared:
         if curve.role == "val":
-            plot_dashed(curve, bounds, width)
+            plot_val(curve)
         else:
             plt.plot(curve.x, curve.y, label=curve.label, color=curve.color, marker="braille")
 
@@ -172,49 +172,5 @@ def axis_padding(lower: float, upper: float) -> float:
     return magnitude * 0.5
 
 
-def plot_dashed(curve: PlotCurve, bounds: PlotBounds, width: int) -> None:
-    if len(curve.x) < 3:
-        plt.scatter(curve.x, curve.y, label=curve.label, color=curve.color, marker="dot")
-        return
-
-    plt.scatter(curve.x, curve.y, label=curve.label, color=curve.color, marker="dot")
-    for x_segment, y_segment in dashed_segments(curve, bounds, width):
-        if len(x_segment) < 2:
-            continue
-        plt.plot(
-            x_segment,
-            y_segment,
-            label=None,
-            color=curve.color,
-            marker="dot",
-        )
-
-
-def dashed_segments(curve: PlotCurve, bounds: PlotBounds, width: int) -> list[tuple[tuple[float, ...], tuple[float, ...]]]:
-    plot_width = max(width, 12)
-    span = bounds.x_right - bounds.x_left
-    if span <= 0:
-        return [(curve.x, curve.y)]
-
-    segments: list[tuple[list[float], list[float]]] = []
-    current_x: list[float] = []
-    current_y: list[float] = []
-    previous_column: int | None = None
-
-    for x, y in zip(curve.x, curve.y, strict=False):
-        column = int((x - bounds.x_left) / span * (plot_width - 1))
-        keep = column % 8 < 4
-        contiguous = previous_column is None or column - previous_column <= 1
-        if keep and contiguous:
-            current_x.append(x)
-            current_y.append(y)
-        else:
-            if current_x:
-                segments.append((current_x, current_y))
-            current_x = [x] if keep else []
-            current_y = [y] if keep else []
-        previous_column = column
-
-    if current_x:
-        segments.append((current_x, current_y))
-    return [(tuple(x_segment), tuple(y_segment)) for x_segment, y_segment in segments]
+def plot_val(curve: PlotCurve) -> None:
+    plt.plot(curve.x, curve.y, label=curve.label, color=curve.color, marker="dot")
