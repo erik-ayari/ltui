@@ -228,6 +228,7 @@ class LightningTuiApp(App[None]):
     CSS = """
     Screen {
         layout: vertical;
+        background: $surface;
     }
 
     #header {
@@ -239,6 +240,7 @@ class LightningTuiApp(App[None]):
     #plot {
         height: 1fr;
         padding: 0 1;
+        background: $surface;
     }
 
     #footer {
@@ -365,9 +367,7 @@ class LightningTuiApp(App[None]):
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
-        self.query_one("#footer", Static).update(
-            "m metrics  r runs  c configs  / search  n/p metric  a axis  d dark  s smooth  x/y log  space pause  R rescan  q quit"
-        )
+        self.query_one("#footer", Static).update(keybinding_bar())
         asyncio.create_task(self.refresh_snapshot(initial=True))
         self.set_interval(1.5, self.schedule_live_refresh)
 
@@ -727,3 +727,26 @@ def onoff(value: bool) -> str:
 
 def theme_name(dark_mode: bool) -> str:
     return "dark" if dark_mode else "light"
+
+
+def keybinding_bar() -> Text:
+    items = (
+        ("m", "metrics"),
+        ("r", "runs"),
+        ("c", "configs"),
+        ("n/p", "metric"),
+        ("a", "axis"),
+        ("d", "theme"),
+        ("s", "smooth"),
+        ("x/y", "log"),
+        ("sp", "pause"),
+        ("R", "scan"),
+        ("q", "quit"),
+    )
+    text = Text()
+    for index, (key, label) in enumerate(items):
+        if index:
+            text.append("  ", style="dim")
+        text.append(f" {key} ", style="bold reverse")
+        text.append(f" {label}")
+    return text
