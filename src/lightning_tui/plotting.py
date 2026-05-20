@@ -13,6 +13,8 @@ class PlotCurve:
     y: tuple[float, ...]
     color: str = "blue"
     role: str = "raw"
+    run_label: str | None = None
+    style_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -79,12 +81,16 @@ def render_plot(
         plt.ylabel(f"log10({y_label})" if log_y else y_label)
     plt.xlim(left=bounds.x_left, right=bounds.x_right)
     plt.ylim(lower=bounds.y_lower, upper=bounds.y_upper)
+    if x_label in {"step", "epoch"} and not log_x:
+        ticks = integer_ticks(bounds.x_left, bounds.x_right)
+        plt.xticks(ticks, [str(tick) for tick in ticks])
 
     for curve in prepared:
         if curve.role == "val":
             plot_val(curve)
         else:
-            plt.plot(curve.x, curve.y, label=curve.label, color=curve.color, marker="braille")
+            plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="braille")
+    draw_legend_entries(prepared, bounds, dark_mode)
 
     return PlotResult(text=plt.build(), status_messages=tuple(messages))
 
@@ -123,6 +129,8 @@ def prepare_curve(
             y=tuple(kept_y),
             color=curve.color,
             role=curve.role,
+            run_label=curve.run_label,
+            style_label=curve.style_label,
         ),
         dropped_x,
         dropped_y,
@@ -174,5 +182,60 @@ def axis_padding(lower: float, upper: float) -> float:
     return magnitude * 0.5
 
 
+def integer_ticks(left: float, right: float, target_count: int = 6) -> list[int]:
+    start = math.ceil(left)
+    end = math.floor(right)
+    if end < start:
+        return [round(left)]
+
+    span = max(end - start, 1)
+    step = nice_integer_step(math.ceil(span / max(target_count - 1, 1)))
+    first = math.ceil(start / step) * step
+    ticks = list(range(first, end + 1, step))
+    if start == 0 and (not ticks or ticks[0] != 0):
+        ticks.insert(0, 0)
+    return ticks or [start]
+
+
+def nice_integer_step(minimum: int) -> int:
+    if minimum <= 1:
+        return 1
+    magnitude = 10 ** int(math.floor(math.log10(minimum)))
+    for factor in (1, 2, 5, 10):
+        step = factor * magnitude
+        if step >= minimum:
+            return step
+    return 10 * magnitude
+
+
 def plot_val(curve: PlotCurve) -> None:
-    plt.plot(curve.x, curve.y, label=curve.label, color=curve.color, marker="dot")
+    plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="dot")
+
+
+def draw_legend_entries(curves: list[PlotCurve], bounds: PlotBounds, dark_mode: bool) -> None:
+    x = bounds.x_left
+    y = bounds.y_upper
+    run_labels = run_legend_entries(curves)
+    neutral = "white" if dark_mode else "black"
+
+    for label, color in run_labels:
+        plt.plot([x], [y], label=label, color=color, marker="dot")
+    if any(curve.style_label == "train" for curve in curves):
+        plt.plot([x], [y], label="train", color=neutral, marker="braille")
+    if any(curve.style_label == "val" for curve in curves):
+        plt.plot([x], [y], label="val", color=neutral, marker="dot")
+
+
+def run_legend_entries(curves: list[PlotCurve]) -> list[tuple[str, str]]:
+    run_count = len({curve.run_label for curve in curves if curve.run_label is not None})
+    if run_count <= 1:
+        return []
+
+    entries: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for curve in curves:
+        if curve.run_label is None or curve.run_label in seen:
+            continue
+        entries.append((curve.run_label, curve.color))
+        seen.add(curve.run_label)
+    return entries

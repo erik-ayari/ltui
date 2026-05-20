@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from lightning_tui.app import LightningTuiApp, SelectorScreen
+from lightning_tui.app import ConfigScreen, LightningTuiApp, SelectorScreen
 
 
 def test_metric_selector_opens_without_shadowing_textual_query() -> None:
@@ -20,6 +20,29 @@ def test_metric_selector_opens_without_shadowing_textual_query() -> None:
                 await pilot.pause(0.1)
 
                 assert isinstance(app.screen, SelectorScreen)
+
+    asyncio.run(run())
+
+
+def test_config_selector_opens_for_runs_with_unique_yaml() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics = root / "version_0" / "metrics.csv"
+            config = root / "version_0" / "config.yaml"
+            metrics.parent.mkdir(parents=True)
+            metrics.write_text("step,train_loss\n0,1.0\n")
+            config.write_text("trainer:\n  max_epochs: 2\n")
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+                await pilot.press("c")
+                await pilot.pause(0.2)
+
+                assert isinstance(app.screen, ConfigScreen)
+                assert "trainer:" in app.screen.query_one("#config-preview").text
+                assert "[ ]" not in str(app.screen.query_one("#config-options").get_option_at_index(0).prompt)
 
     asyncio.run(run())
 
@@ -101,5 +124,33 @@ def test_compare_labels_are_implicit_from_selected_runs() -> None:
                 app.selected_metrics = ["loss"]
 
                 assert [curve.label for curve in app.build_curves()] == ["run_a/version_0 train", "run_b/version_0 train"]
+
+    asyncio.run(run())
+
+
+def test_multi_run_plotext_labels_include_runs_and_styles() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "run_a" / "version_0" / "metrics.csv"
+            second = root / "run_b" / "version_0" / "metrics.csv"
+            first.parent.mkdir(parents=True)
+            second.parent.mkdir(parents=True)
+            first.write_text("step,train_loss,val_loss\n0,1.0,\n1,,0.8\n")
+            second.write_text("step,train_loss,val_loss\n0,0.9,\n1,,0.7\n")
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+                app.selected_run_paths = [str(first.resolve()), str(second.resolve())]
+                app.selected_metrics = ["loss"]
+                labels = [curve.label for curve in app.build_curves()]
+
+                assert labels == [
+                    "run_a/version_0 train",
+                    "run_a/version_0 val",
+                    "run_b/version_0 train",
+                    "run_b/version_0 val",
+                ]
 
     asyncio.run(run())

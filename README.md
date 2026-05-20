@@ -69,6 +69,7 @@ Display names are derived from paths relative to the scanned root.
 ```text
 m       open metric selector
 r       open run/version selector
+c       open config viewer for runs with a unique YAML config
 /       fuzzy search inside selector
 arrows  navigate selector
 space   toggle selection in selector, pause/resume on main screen
@@ -94,6 +95,7 @@ Grouped mode is enabled by default. `train_loss_step`, `train_loss_epoch`, and `
 - X-axis can be toggled between `step` and `epoch`
 - Step and epoch axes are anchored at `0`
 - Dark plot theme is enabled by default
+- Config viewer shows runs that have exactly one `.yaml` or `.yml` associated with the version
 - Metric columns: numeric columns except `step` and `epoch`
 - Rows with `NaN` for the selected metric are dropped
 - Points are sorted by x-axis before plotting

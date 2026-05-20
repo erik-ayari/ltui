@@ -13,6 +13,7 @@ RunStatus = Literal["active", "stale", "finished"]
 class RunVersion:
     display_name: str
     metrics_csv_path: Path
+    config_yaml_path: Path | None
     parent_name: str | None
     version_name: str | None
     last_modified: float
@@ -41,6 +42,7 @@ def discover_runs(
             RunVersion(
                 display_name=display_name,
                 metrics_csv_path=metrics_path.resolve(),
+                config_yaml_path=find_unique_config_yaml(metrics_path),
                 parent_name=parent_name,
                 version_name=version_name,
                 last_modified=stat.st_mtime,
@@ -73,3 +75,21 @@ def classify_status(age_seconds: float, active_age_seconds: float, stale_age_sec
     if age_seconds <= stale_age_seconds:
         return "stale"
     return "finished"
+
+
+def find_unique_config_yaml(metrics_path: Path) -> Path | None:
+    for directory in config_candidate_dirs(metrics_path):
+        candidates = sorted(path.resolve() for path in directory.glob("*.y*ml") if path.is_file())
+        if len(candidates) == 1:
+            return candidates[0]
+    return None
+
+
+def config_candidate_dirs(metrics_path: Path) -> tuple[Path, ...]:
+    version_dir = metrics_path.parent
+    candidates = [version_dir]
+    if version_dir.name.startswith("version_") and version_dir.parent.name in {"csv", "lightning_logs"}:
+        sibling_version_dir = version_dir.parent.parent / version_dir.name
+        if sibling_version_dir != version_dir:
+            candidates.append(sibling_version_dir)
+    return tuple(candidates)

@@ -2,7 +2,15 @@ from unittest.mock import patch
 
 import pytest
 
-from lightning_tui.plotting import PlotCurve, plot_val, prepare_curve, render_plot
+from lightning_tui.plotting import (
+    PlotBounds,
+    PlotCurve,
+    draw_legend_entries,
+    integer_ticks,
+    plot_val,
+    prepare_curve,
+    render_plot,
+)
 
 
 def test_log_scaling_drops_nonpositive_values() -> None:
@@ -25,6 +33,21 @@ def test_render_plot_can_force_x_axis_to_zero() -> None:
     assert xlim.call_args.kwargs["left"] == 0
     assert xlim.call_args.kwargs["right"] == pytest.approx(50.47)
     ylim.assert_called_once()
+
+
+def test_render_plot_uses_integer_step_ticks() -> None:
+    curve = PlotCurve(label="train", x=(24.0, 49.0), y=(1.0, 0.8))
+
+    with patch("lightning_tui.plotting.plt.xticks") as xticks:
+        render_plot([curve], width=60, height=20, x_label="step", x_min=0)
+
+    ticks, labels = xticks.call_args.args
+    assert ticks == [0, 10, 20, 30, 40, 50]
+    assert labels == ["0", "10", "20", "30", "40", "50"]
+
+
+def test_integer_ticks_are_discrete_for_small_epoch_range() -> None:
+    assert integer_ticks(0, 3.2) == [0, 1, 2, 3]
 
 
 def test_render_plot_sets_title_and_dark_theme() -> None:
@@ -52,4 +75,23 @@ def test_val_curve_uses_connected_dotted_line() -> None:
     with patch("lightning_tui.plotting.plt.plot") as plot:
         plot_val(curve)
 
-    plot.assert_called_once_with(curve.x, curve.y, label="val", color="blue", marker="dot")
+    plot.assert_called_once_with(curve.x, curve.y, label=None, color="blue", marker="dot")
+
+
+def test_custom_legend_entries_use_run_colors_then_neutral_styles() -> None:
+    curves = [
+        PlotCurve("run_a train", (0.0,), (1.0,), color="blue", role="train", run_label="run_a", style_label="train"),
+        PlotCurve("run_a val", (0.0,), (0.8,), color="blue", role="val", run_label="run_a", style_label="val"),
+        PlotCurve("run_b train", (0.0,), (0.9,), color="red", role="train", run_label="run_b", style_label="train"),
+    ]
+    bounds = PlotBounds(x_left=0, x_right=10, y_lower=0, y_upper=1)
+
+    with patch("lightning_tui.plotting.plt.plot") as plot:
+        draw_legend_entries(curves, bounds, dark_mode=True)
+
+    labels = [call.kwargs["label"] for call in plot.call_args_list]
+    colors = [call.kwargs["color"] for call in plot.call_args_list]
+    markers = [call.kwargs["marker"] for call in plot.call_args_list]
+    assert labels == ["run_a", "run_b", "train", "val"]
+    assert colors == ["blue", "red", "white", "white"]
+    assert markers == ["dot", "dot", "braille", "dot"]

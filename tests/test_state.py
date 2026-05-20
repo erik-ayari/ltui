@@ -11,6 +11,7 @@ def test_state_restore_drops_missing_paths_and_metrics(tmp_path: Path) -> None:
     run = RunVersion(
         display_name="version_0",
         metrics_csv_path=existing.resolve(),
+        config_yaml_path=None,
         parent_name=None,
         version_name="version_0",
         last_modified=1.0,

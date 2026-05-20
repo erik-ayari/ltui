@@ -8,9 +8,9 @@ from rapidfuzz import fuzz
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
 from .data import AxisMode, RunMetrics, load_run_metrics, metric_series, resolve_family, resolve_x_axis
@@ -123,6 +123,107 @@ class SelectorScreen(ModalScreen[list[str] | None]):
         return f"{marker} {item.label}"
 
 
+class ConfigItem:
+    def __init__(self, run: RunVersion) -> None:
+        self.run = run
+        self.key = str(run.metrics_csv_path)
+        self.label = run.display_name
+        self.search_text = f"{run.display_name} {run.metrics_csv_path} {run.config_yaml_path}"
+
+
+class ConfigScreen(ModalScreen[None]):
+    BINDINGS = [
+        Binding("/", "focus_search", "Search", show=False),
+        Binding("enter", "close", "Close", show=False),
+        Binding("escape", "close", "Close", show=False),
+    ]
+
+    def __init__(self, items: list[ConfigItem]) -> None:
+        super().__init__()
+        self.items = items
+        self.search_query = ""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="config-viewer"):
+            yield Static("Configs", id="config-title")
+            with Horizontal(id="config-body"):
+                with Vertical(id="config-list-pane"):
+                    yield Input(placeholder="Search", id="config-search")
+                    yield OptionList(id="config-options", markup=False)
+                yield TextArea(
+                    "",
+                    language="yaml",
+                    read_only=True,
+                    show_line_numbers=True,
+                    id="config-preview",
+                )
+            yield Static("/ search  arrows choose run  enter/escape close", id="config-help")
+
+    def on_mount(self) -> None:
+        self.refresh_options()
+        self.query_one(OptionList).focus()
+        self.update_preview()
+
+    def action_focus_search(self) -> None:
+        self.query_one(Input).focus()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "config-search":
+            return
+        self.search_query = event.value
+        self.refresh_options()
+        self.update_preview()
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        event.stop()
+        self.update_preview()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.update_preview()
+
+    def refresh_options(self) -> None:
+        option_list = self.query_one(OptionList)
+        option_list.clear_options()
+        option_list.add_options(Option(item.label, id=item.key) for item in self.filtered_items())
+        if option_list.option_count:
+            option_list.highlighted = 0
+
+    def filtered_items(self) -> list[ConfigItem]:
+        if not self.search_query:
+            return self.items
+        scored = [
+            (fuzz.WRatio(self.search_query, item.search_text), index, item)
+            for index, item in enumerate(self.items)
+        ]
+        return [item for score, index, item in sorted(scored, key=lambda value: (-value[0], value[1])) if score >= 35]
+
+    def update_preview(self) -> None:
+        text_area = self.query_one(TextArea)
+        selected = self.selected_item()
+        if selected is None or selected.run.config_yaml_path is None:
+            text_area.load_text("No config selected.")
+            return
+        try:
+            text = selected.run.config_yaml_path.read_text(errors="replace")
+        except OSError as exc:
+            text = f"Could not read {selected.run.config_yaml_path}\n\n{exc}"
+        text_area.load_text(f"# {selected.run.display_name}\n# {selected.run.config_yaml_path}\n\n{text}")
+
+    def selected_item(self) -> ConfigItem | None:
+        option_list = self.query_one(OptionList)
+        if option_list.highlighted is None:
+            return None
+        option = option_list.get_option_at_index(option_list.highlighted)
+        if option.id is None:
+            return None
+        key = str(option.id)
+        return next((item for item in self.items if item.key == key), None)
+
+
 class LightningTuiApp(App[None]):
     CSS = """
     Screen {
@@ -148,6 +249,10 @@ class LightningTuiApp(App[None]):
     }
 
     SelectorScreen {
+        align: center middle;
+    }
+
+    ConfigScreen {
         align: center middle;
     }
 
@@ -177,11 +282,54 @@ class LightningTuiApp(App[None]):
         padding: 0 1;
         color: $text-muted;
     }
+
+    #config-viewer {
+        width: 88%;
+        height: 86%;
+        border: solid $accent;
+        background: $panel;
+    }
+
+    #config-title {
+        height: 1;
+        padding: 0 1;
+    }
+
+    #config-body {
+        height: 1fr;
+    }
+
+    #config-list-pane {
+        width: 32%;
+        height: 1fr;
+        padding: 0 1;
+    }
+
+    #config-search {
+        height: 3;
+    }
+
+    #config-options {
+        height: 1fr;
+    }
+
+    #config-preview {
+        width: 1fr;
+        height: 1fr;
+        border-left: solid $primary;
+    }
+
+    #config-help {
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
+    }
     """
 
     BINDINGS = [
         Binding("m", "open_metric_selector", "Metrics"),
         Binding("r", "open_run_selector", "Runs"),
+        Binding("c", "open_config_selector", "Configs"),
         Binding("n", "next_metric", "Next metric"),
         Binding("p", "previous_metric", "Previous metric"),
         Binding("a", "toggle_x_axis", "X axis"),
@@ -218,7 +366,7 @@ class LightningTuiApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one("#footer", Static).update(
-            "m metrics  r runs  / search  n/p metric  a axis  d dark  s smooth  x/y log  space pause  R rescan  q quit"
+            "m metrics  r runs  c configs  / search  n/p metric  a axis  d dark  s smooth  x/y log  space pause  R rescan  q quit"
         )
         asyncio.create_task(self.refresh_snapshot(initial=True))
         self.set_interval(1.5, self.schedule_live_refresh)
@@ -384,14 +532,22 @@ class LightningTuiApp(App[None]):
                         y=series.y,
                         color=color,
                         role=role,
+                        run_label=run.display_name,
+                        style_label=self.style_label(metric_name, role),
                     )
                 )
         return curves
 
     def curve_label(self, run: RunVersion, metric_name: str, role: str) -> str:
+        style_label = self.style_label(metric_name, role)
         if self.grouped_mode and role in {"train", "val"}:
-            return role if len(self.selected_run_paths) == 1 else f"{run.display_name} {role}"
+            return style_label if len(self.selected_run_paths) == 1 else f"{run.display_name} {style_label}"
         return metric_name if len(self.selected_run_paths) == 1 else f"{run.display_name} {metric_name}"
+
+    def style_label(self, metric_name: str, role: str) -> str:
+        if self.grouped_mode and role in {"train", "val"}:
+            return role
+        return metric_name
 
     def metric_choices_for_runs(self, run_paths: list[str]) -> tuple[str, ...]:
         seen: set[str] = set()
@@ -492,6 +648,14 @@ class LightningTuiApp(App[None]):
             for run in self.runs
         ]
         self.push_screen(SelectorScreen("Runs", items, self.selected_run_paths), self.apply_run_selection)
+
+    def action_open_config_selector(self) -> None:
+        items = [ConfigItem(run) for run in self.runs if run.config_yaml_path is not None]
+        if not items:
+            self.status_message = "no unique yaml configs found"
+            self.render_current()
+            return
+        self.push_screen(ConfigScreen(items))
 
     def apply_run_selection(self, selected: list[str] | None) -> None:
         if selected is None:
