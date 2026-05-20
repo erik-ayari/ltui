@@ -184,8 +184,6 @@ class LightningTuiApp(App[None]):
         Binding("r", "open_run_selector", "Runs"),
         Binding("n", "next_metric", "Next metric"),
         Binding("p", "previous_metric", "Previous metric"),
-        Binding("c", "toggle_compare", "Compare"),
-        Binding("g", "toggle_grouped", "Grouped"),
         Binding("a", "toggle_x_axis", "X axis"),
         Binding("d", "toggle_dark_mode", "Dark"),
         Binding("s", "toggle_smoothing", "Smoothing"),
@@ -210,7 +208,6 @@ class LightningTuiApp(App[None]):
         self.log_x = False
         self.log_y = False
         self.paused = False
-        self.compare_mode = False
         self.status_message = "starting"
         self.refreshing = False
 
@@ -221,7 +218,7 @@ class LightningTuiApp(App[None]):
 
     def on_mount(self) -> None:
         self.query_one("#footer", Static).update(
-            "m metrics  r runs  / search  n/p metric  c compare  g group  a axis  d dark  s smooth  x/y log  space pause  R rescan  q quit"
+            "m metrics  r runs  / search  n/p metric  a axis  d dark  s smooth  x/y log  space pause  R rescan  q quit"
         )
         asyncio.create_task(self.refresh_snapshot(initial=True))
         self.set_interval(1.5, self.schedule_live_refresh)
@@ -295,7 +292,6 @@ class LightningTuiApp(App[None]):
             self.selected_metrics = [self.default_metric_choice(choices)]
         if self.active_metric_index >= len(self.selected_metrics):
             self.active_metric_index = 0
-        self.sync_compare_mode()
 
     def render_current(self) -> None:
         plot = self.query_one("#plot", Static)
@@ -341,12 +337,11 @@ class LightningTuiApp(App[None]):
             run_text += f" +{len(run_names) - 3}"
         statuses = sorted({self.run_by_path(path).status for path in self.selected_run_paths if self.run_by_path(path)})
         status_text = "/".join(statuses) if statuses else "no runs"
-        mode = "compare" if self.compare_mode else "single"
-        grouped = "grouped" if self.grouped_mode else "raw"
         live = "paused" if self.paused else "live"
+        run_mode = "compare" if len(self.selected_run_paths) > 1 else "single"
         header.update(
             f"runs: {run_text}\n"
-            f"metric: {self.active_metric() or 'none'}  mode: {mode}/{grouped}  x-axis: {self.current_x_axis()}  theme: {theme_name(self.dark_mode)}  status: {status_text}/{live}  smooth: {onoff(self.smoothing)}  log-x: {onoff(self.log_x)}  log-y: {onoff(self.log_y)}\n"
+            f"metric: {self.active_metric() or 'none'}  mode: {run_mode}  x-axis: {self.current_x_axis()}  theme: {theme_name(self.dark_mode)}  status: {status_text}/{live}  smooth: {onoff(self.smoothing)}  log-x: {onoff(self.log_x)}  log-y: {onoff(self.log_y)}\n"
             f"{self.status_message}"
         )
 
@@ -395,8 +390,8 @@ class LightningTuiApp(App[None]):
 
     def curve_label(self, run: RunVersion, metric_name: str, role: str) -> str:
         if self.grouped_mode and role in {"train", "val"}:
-            return role
-        return metric_name if not self.compare_mode else f"{run.display_name} {metric_name}"
+            return role if len(self.selected_run_paths) == 1 else f"{run.display_name} {role}"
+        return metric_name if len(self.selected_run_paths) == 1 else f"{run.display_name} {metric_name}"
 
     def metric_choices_for_runs(self, run_paths: list[str]) -> tuple[str, ...]:
         seen: set[str] = set()
@@ -456,9 +451,6 @@ class LightningTuiApp(App[None]):
                 return run
         return None
 
-    def sync_compare_mode(self) -> None:
-        self.compare_mode = len(self.selected_run_paths) > 1
-
     def persist_state(self) -> None:
         save_state(
             self.root,
@@ -513,7 +505,6 @@ class LightningTuiApp(App[None]):
         if not self.selected_metrics and choices:
             self.selected_metrics = [self.default_metric_choice(choices)]
         self.active_metric_index = 0
-        self.sync_compare_mode()
         self.render_current()
 
     def action_next_metric(self) -> None:
@@ -525,26 +516,6 @@ class LightningTuiApp(App[None]):
         if self.selected_metrics:
             self.active_metric_index = (self.active_metric_index - 1) % len(self.selected_metrics)
             self.render_current()
-
-    def action_toggle_compare(self) -> None:
-        if len(self.selected_run_paths) <= 1:
-            self.compare_mode = False
-            self.status_message = "compare needs multiple selected runs"
-        else:
-            self.compare_mode = not self.compare_mode
-        self.render_current()
-
-    def action_toggle_grouped(self) -> None:
-        old_active = self.active_metric()
-        self.grouped_mode = not self.grouped_mode
-        choices = self.metric_choices_for_runs(self.selected_run_paths)
-        self.selected_metrics = [metric for metric in self.selected_metrics if metric in choices]
-        if old_active in choices and old_active not in self.selected_metrics:
-            self.selected_metrics.insert(0, old_active)
-        if not self.selected_metrics and choices:
-            self.selected_metrics = [self.default_metric_choice(choices)]
-        self.active_metric_index = 0
-        self.render_current()
 
     def action_toggle_x_axis(self) -> None:
         self.x_axis_mode = "epoch" if self.x_axis_mode == "step" else "step"

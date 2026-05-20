@@ -75,8 +75,6 @@ space   toggle selection in selector, pause/resume on main screen
 enter   apply selector
 n       next selected metric/family
 p       previous selected metric/family
-c       toggle compare mode
-g       toggle grouped train/val metric-family mode
 a       toggle x-axis between step and epoch
 d       toggle dark/light plot theme
 s       toggle smoothing
