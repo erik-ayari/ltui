@@ -22,6 +22,7 @@ def test_state_restore_drops_missing_paths_and_metrics(tmp_path: Path) -> None:
         selected_metrics=("loss", "missing"),
         active_metric="missing",
         x_axis_mode="epoch",
+        dark_mode=False,
     )
 
     restored = valid_state(saved, [run], ("loss",))
@@ -30,3 +31,4 @@ def test_state_restore_drops_missing_paths_and_metrics(tmp_path: Path) -> None:
     assert restored.selected_metrics == ("loss",)
     assert restored.active_metric == "loss"
     assert restored.x_axis_mode == "epoch"
+    assert restored.dark_mode is False

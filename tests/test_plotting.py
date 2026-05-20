@@ -27,6 +27,25 @@ def test_render_plot_can_force_x_axis_to_zero() -> None:
     ylim.assert_called_once()
 
 
+def test_render_plot_sets_title_and_dark_theme() -> None:
+    curve = PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))
+
+    with patch("lightning_tui.plotting.plt.title") as title, patch("lightning_tui.plotting.plt.theme") as theme:
+        render_plot([curve], width=60, height=20, title="loss", dark_mode=True)
+
+    title.assert_called_once_with("loss")
+    theme.assert_called_once_with("dark")
+
+
+def test_render_plot_can_use_light_theme() -> None:
+    curve = PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))
+
+    with patch("lightning_tui.plotting.plt.theme") as theme:
+        render_plot([curve], width=60, height=20, dark_mode=False)
+
+    theme.assert_called_once_with("default")
+
+
 def test_val_curve_uses_connected_dotted_line() -> None:
     curve = PlotCurve(label="val", x=(1.0, 10.0, 20.0), y=(0.9, 0.7, 0.6), role="val")
 

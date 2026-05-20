@@ -78,6 +78,7 @@ p       previous selected metric/family
 c       toggle compare mode
 g       toggle grouped train/val metric-family mode
 a       toggle x-axis between step and epoch
+d       toggle dark/light plot theme
 s       toggle smoothing
 x       toggle log-x
 y       toggle log-y
@@ -94,6 +95,7 @@ Grouped mode is enabled by default. `train_loss_step`, `train_loss_epoch`, and `
 - Final fallback: row index
 - X-axis can be toggled between `step` and `epoch`
 - Step and epoch axes are anchored at `0`
+- Dark plot theme is enabled by default
 - Metric columns: numeric columns except `step` and `epoch`
 - Rows with `NaN` for the selected metric are dropped
 - Points are sorted by x-axis before plotting

@@ -41,6 +41,7 @@ def render_plot(
     log_x: bool = False,
     log_y: bool = False,
     x_min: float | None = None,
+    dark_mode: bool = True,
 ) -> PlotResult:
     prepared: list[PlotCurve] = []
     dropped_x = 0
@@ -67,6 +68,7 @@ def render_plot(
 
     bounds = plot_bounds(prepared, x_min=None if log_x else x_min)
     plt.clear_figure()
+    plt.theme("dark" if dark_mode else "default")
     plt.plotsize(max(width, 30), max(height, 8))
     plt.grid(True, True)
     if title:
