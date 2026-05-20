@@ -42,7 +42,7 @@ class SelectorScreen(ModalScreen[list[str] | None]):
         self.title = title
         self.items = items
         self.selected = list(selected)
-        self.query = ""
+        self.search_query = ""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="selector"):
@@ -90,7 +90,7 @@ class SelectorScreen(ModalScreen[list[str] | None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "search":
             return
-        self.query = event.value
+        self.search_query = event.value
         self.refresh_options()
 
     def refresh_options(self, highlight_key: str | None = None) -> None:
@@ -110,10 +110,10 @@ class SelectorScreen(ModalScreen[list[str] | None]):
         option_list.highlighted = highlight
 
     def filtered_items(self) -> list[SelectorItem]:
-        if not self.query:
+        if not self.search_query:
             return self.items
         scored = [
-            (fuzz.WRatio(self.query, item.search_text), index, item)
+            (fuzz.WRatio(self.search_query, item.search_text), index, item)
             for index, item in enumerate(self.items)
         ]
         return [item for score, index, item in sorted(scored, key=lambda value: (-value[0], value[1])) if score >= 35]
