@@ -308,23 +308,27 @@ class LightningTuiApp(App[None]):
         curves = self.build_curves()
         size = plot.size
         active_metric = self.active_metric()
+        x_axis = self.current_x_axis()
         result = render_plot(
             curves,
             width=max(size.width - 2, 60),
-            height=max(size.height - 2, 16),
-            title=active_metric,
-            x_label=self.current_x_axis(),
+            height=max(size.height - 3, 16),
+            x_label=x_axis,
             y_label=active_metric,
             smoothing=self.smoothing,
             log_x=self.log_x,
             log_y=self.log_y,
+            x_min=0 if x_axis in {"step", "epoch"} else None,
         )
         if result.status_messages:
             self.status_message = " | ".join(result.status_messages)
         elif self.status_message.startswith("log-"):
             self.status_message = "paused" if self.paused else "live"
         self.update_header()
-        plot.update(Text.from_ansi(result.text))
+        plot_text = Text(active_metric or "", style="bold")
+        plot_text.append("\n")
+        plot_text.append_text(Text.from_ansi(result.text))
+        plot.update(plot_text)
         self.persist_state()
 
     def update_header(self) -> None:
@@ -375,7 +379,7 @@ class LightningTuiApp(App[None]):
                 series = metric_series(metrics, metric_name, self.x_axis_mode)
                 if not series.x:
                     continue
-                label = metric_name if not self.compare_mode else f"{run.display_name} {metric_name}"
+                label = self.curve_label(run, metric_name, role)
                 curves.append(
                     PlotCurve(
                         label=label,
@@ -386,6 +390,11 @@ class LightningTuiApp(App[None]):
                     )
                 )
         return curves
+
+    def curve_label(self, run: RunVersion, metric_name: str, role: str) -> str:
+        if self.grouped_mode and role in {"train", "val"}:
+            return role
+        return metric_name if not self.compare_mode else f"{run.display_name} {metric_name}"
 
     def metric_choices_for_runs(self, run_paths: list[str]) -> tuple[str, ...]:
         seen: set[str] = set()

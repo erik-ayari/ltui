@@ -32,6 +32,7 @@ def render_plot(
     smoothing: bool = False,
     log_x: bool = False,
     log_y: bool = False,
+    x_min: float | None = None,
 ) -> PlotResult:
     prepared: list[PlotCurve] = []
     dropped_x = 0
@@ -65,6 +66,8 @@ def render_plot(
         plt.xlabel(f"log10({x_label})" if log_x else x_label)
     if y_label:
         plt.ylabel(f"log10({y_label})" if log_y else y_label)
+    if x_min is not None and not log_x:
+        plt.xlim(left=x_min)
 
     for curve in prepared:
         if curve.role == "val":

@@ -93,6 +93,7 @@ Grouped mode is enabled by default. `train_loss_step`, `train_loss_epoch`, and `
 - Fallback x-axis: `epoch`
 - Final fallback: row index
 - X-axis can be toggled between `step` and `epoch`
+- Step and epoch axes are anchored at `0`
 - Metric columns: numeric columns except `step` and `epoch`
 - Rows with `NaN` for the selected metric are dropped
 - Points are sorted by x-axis before plotting

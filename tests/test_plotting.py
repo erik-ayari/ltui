@@ -1,4 +1,6 @@
-from lightning_tui.plotting import PlotCurve, prepare_curve
+from unittest.mock import patch
+
+from lightning_tui.plotting import PlotCurve, prepare_curve, render_plot
 
 
 def test_log_scaling_drops_nonpositive_values() -> None:
@@ -10,3 +12,12 @@ def test_log_scaling_drops_nonpositive_values() -> None:
     assert scaled.y == (3.0, 4.0)
     assert dropped_x == 2
     assert dropped_y == 0
+
+
+def test_render_plot_can_force_x_axis_to_zero() -> None:
+    curve = PlotCurve(label="train", x=(24.0, 49.0), y=(1.0, 0.8))
+
+    with patch("lightning_tui.plotting.plt.xlim") as xlim:
+        render_plot([curve], width=60, height=20, x_min=0)
+
+    xlim.assert_called_once_with(left=0)

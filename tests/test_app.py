@@ -43,3 +43,20 @@ def test_axis_toggle_switches_step_epoch() -> None:
                 assert app.x_axis_mode == "epoch"
 
     asyncio.run(run())
+
+
+def test_grouped_legend_labels_use_train_val() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics = root / "lightning_logs" / "version_0" / "metrics.csv"
+            metrics.parent.mkdir(parents=True)
+            metrics.write_text("step,train_loss,val_loss\n0,1.0,\n1,,0.8\n")
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(100, 35)) as pilot:
+                await pilot.pause(0.5)
+
+                assert [curve.label for curve in app.build_curves()] == ["train", "val"]
+
+    asyncio.run(run())
