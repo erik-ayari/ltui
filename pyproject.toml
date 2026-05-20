@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.29"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lightning-tui"
+version = "0.1.0"
+description = "Terminal UI for PyTorch Lightning CSVLogger metrics"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "lightning-tui contributors" }
+]
+dependencies = [
+  "pandas>=2.2",
+  "plotext>=5.3",
+  "rapidfuzz>=3.0",
+  "textual>=0.80",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+ltui = "lightning_tui.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
