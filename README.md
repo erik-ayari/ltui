@@ -1,5 +1,7 @@
 # ltui
 
+[![CI](https://github.com/erik-ayari/ltui/actions/workflows/ci.yml/badge.svg)](https://github.com/erik-ayari/ltui/actions/workflows/ci.yml)
+
 Terminal UI for live and posthoc visualization of PyTorch Lightning `CSVLogger` metrics.
 
 `ltui` is built for SSH and tmux workflows: no browser, no server process, no TensorBoard dependency. Point it at a log root and it recursively finds Lightning `metrics.csv` files, lets you switch runs and metrics from the keyboard, and renders a single focused terminal plot.
