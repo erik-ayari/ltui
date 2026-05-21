@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lightning_tui.plotting import (
+from ltui.plotting import (
     LegendEntry,
     PlotBounds,
     PlotCurve,
@@ -29,7 +29,7 @@ def test_log_scaling_drops_nonpositive_values() -> None:
 def test_render_plot_can_force_x_axis_to_zero() -> None:
     curve = PlotCurve(label="train", x=(24.0, 49.0), y=(1.0, 0.8))
 
-    with patch("lightning_tui.plotting.plt.xlim") as xlim, patch("lightning_tui.plotting.plt.ylim") as ylim:
+    with patch("ltui.plotting.plt.xlim") as xlim, patch("ltui.plotting.plt.ylim") as ylim:
         render_plot([curve], width=60, height=20, x_min=0)
 
     assert xlim.call_args.kwargs["left"] == 0
@@ -40,7 +40,7 @@ def test_render_plot_can_force_x_axis_to_zero() -> None:
 def test_render_plot_uses_integer_step_ticks() -> None:
     curve = PlotCurve(label="train", x=(24.0, 49.0), y=(1.0, 0.8))
 
-    with patch("lightning_tui.plotting.plt.xticks") as xticks:
+    with patch("ltui.plotting.plt.xticks") as xticks:
         render_plot([curve], width=60, height=20, x_label="step", x_min=0)
 
     ticks, labels = xticks.call_args.args
@@ -55,7 +55,7 @@ def test_integer_ticks_are_discrete_for_small_epoch_range() -> None:
 def test_render_plot_sets_title_and_dark_theme() -> None:
     curve = PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))
 
-    with patch("lightning_tui.plotting.plt.title") as title, patch("lightning_tui.plotting.plt.theme") as theme:
+    with patch("ltui.plotting.plt.title") as title, patch("ltui.plotting.plt.theme") as theme:
         render_plot([curve], width=60, height=20, title="loss", dark_mode=True)
 
     title.assert_called_once_with("loss")
@@ -65,7 +65,7 @@ def test_render_plot_sets_title_and_dark_theme() -> None:
 def test_render_plot_can_use_light_theme() -> None:
     curve = PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))
 
-    with patch("lightning_tui.plotting.plt.theme") as theme:
+    with patch("ltui.plotting.plt.theme") as theme:
         render_plot([curve], width=60, height=20, dark_mode=False)
 
     theme.assert_called_once_with("default")
@@ -74,7 +74,7 @@ def test_render_plot_can_use_light_theme() -> None:
 def test_val_curve_uses_connected_dotted_line() -> None:
     curve = PlotCurve(label="val", x=(1.0, 10.0, 20.0), y=(0.9, 0.7, 0.6), role="val")
 
-    with patch("lightning_tui.plotting.plt.plot") as plot:
+    with patch("ltui.plotting.plt.plot") as plot:
         plot_val(curve)
 
     plot.assert_called_once_with(curve.x, curve.y, label=None, color="blue", marker="dot")
@@ -97,7 +97,7 @@ def test_custom_legend_entries_use_run_colors_then_neutral_styles() -> None:
     ]
     bounds = PlotBounds(x_left=0, x_right=10, y_lower=0, y_upper=1)
 
-    with patch("lightning_tui.plotting.plt.plot") as plot:
+    with patch("ltui.plotting.plt.plot") as plot:
         entries = draw_legend_entries(curves, bounds, dark_mode=True)
 
     labels = [call.kwargs["label"] for call in plot.call_args_list]

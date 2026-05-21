@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from lightning_tui.discovery import discover_runs
+from ltui.discovery import discover_runs
 
 
 def write_metrics(path: Path) -> None:

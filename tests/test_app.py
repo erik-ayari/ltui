@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from lightning_tui.app import PALETTE, ConfigScreen, LightningTuiApp, SelectorScreen
+from ltui.app import PALETTE, ConfigScreen, LightningTuiApp, SelectorScreen
 
 
 def test_metric_selector_opens_without_shadowing_textual_query() -> None:

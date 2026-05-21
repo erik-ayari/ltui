@@ -1,57 +1,75 @@
-# lightning-tui
+# ltui
 
-Terminal UI for live and posthoc PyTorch Lightning `CSVLogger` metrics. It uses Textual and plotext, so it works over SSH and tmux without a browser.
+Terminal UI for live and posthoc visualization of PyTorch Lightning `CSVLogger` metrics.
 
-## Environment
+`ltui` is built for SSH and tmux workflows: no browser, no server process, no TensorBoard dependency. Point it at a log root and it recursively finds Lightning `metrics.csv` files, lets you switch runs and metrics from the keyboard, and renders a single focused terminal plot.
 
-Create and activate a dedicated micromamba environment:
+## Features
+
+- Recursively discovers Lightning `metrics.csv` files in nested experiment folders
+- Live refresh for growing CSV files, with pause and manual rescan
+- Compare multiple runs in one plot
+- Groups `train_` and `val_` metric families by default
+- Step/epoch x-axis switching with integer ticks
+- Optional EMA smoothing and log scaling
+- Fuzzy selectors for runs, metrics, and YAML configs
+- Per-root UI state under `~/.local/state/ltui/`
+
+## Installation
+
+After the first PyPI release:
 
 ```bash
-micromamba create -n lightning-tui python=3.11 -y
-micromamba activate lightning-tui
+pip install ltui
 ```
 
-Install the package editable from this repository:
+### From source
+
+Create a dedicated micromamba environment and install the package editable:
 
 ```bash
+git clone https://github.com/erik-ayari/ltui.git
+cd ltui
+
+micromamba create -n ltui python=3.11 -y
+micromamba activate ltui
 pip install -e ".[dev]"
 ```
 
-This keeps all runtime and development dependencies inside the `lightning-tui` environment. Do not rely on global Python packages.
+This keeps runtime and development dependencies inside the `ltui` environment.
 
-## Usage
+### From any project directory
 
-From any project directory:
+Activate the environment, then run `ltui` against the log root you want to inspect:
 
 ```bash
-micromamba activate lightning-tui
+micromamba activate ltui
 ltui /path/to/log/root
-```
-
-Example:
-
-```bash
-ltui ./lightning_logs
-ltui /data/experiments/my_model
 ```
 
 Optional shell helper:
 
 ```bash
 ltui() {
-  micromamba run -n lightning-tui ltui "$@"
+  micromamba run -n ltui ltui "$@"
 }
 ```
 
-With that function in your shell config, run:
+With that function in your shell config, `ltui /path/to/log/root` works from any directory without manually activating the environment.
+
+## Usage
 
 ```bash
-ltui /path/to/log/root
+ltui ./lightning_logs
+ltui /data/experiments/my_model
+ltui ~/runs/my_experiment
 ```
 
-## Expected Log Layouts
+On startup, `ltui` selects the latest modified run and chooses a default loss metric when one is available.
 
-`ltui` recursively scans for files named `metrics.csv`. Each file is one selectable run/version.
+## Supported Log Layouts
+
+`ltui` targets PyTorch Lightning `CSVLogger` output. Every discovered `metrics.csv` is treated as one selectable run/version.
 
 Supported examples:
 
@@ -62,50 +80,53 @@ run_a/lightning_logs/version_0/metrics.csv
 experiments/group_1/run_a/lightning_logs/version_3/metrics.csv
 ```
 
-Display names are derived from paths relative to the scanned root.
+Display names come from paths relative to the scanned root.
 
 ## Keybindings
 
-```text
-m       open metric selector
-r       open run/version selector
-c       open config viewer for runs with a unique YAML config
-/       fuzzy search inside selector
-arrows  navigate selector
-space   toggle selection in selector, pause/resume on main screen
-enter   apply selector
-n       next selected metric/family
-p       previous selected metric/family
-a       toggle x-axis between step and epoch
-d       toggle dark/light plot theme
-s       toggle smoothing
-x       toggle log-x
-y       toggle log-y
-R       force rescan
-q       quit
+| Key | Action |
+| --- | --- |
+| `m` | Open metric selector |
+| `r` | Open run/version selector |
+| `c` | Open config viewer for runs with a unique YAML config |
+| `/` | Fuzzy search inside selector |
+| `arrow keys` | Navigate selector |
+| `space` | Toggle selection in selector, pause/resume on main screen |
+| `enter` | Apply selector |
+| `n` | Next selected metric/family |
+| `p` | Previous selected metric/family |
+| `a` | Toggle x-axis between step and epoch |
+| `d` | Toggle dark/light plot theme |
+| `s` | Toggle smoothing |
+| `x` | Toggle log-x |
+| `y` | Toggle log-y |
+| `R` | Force rescan |
+| `q` | Quit |
+
+## Metric Handling
+
+Metric columns are numeric columns except `step` and `epoch`. Rows with `NaN` for the selected metric are dropped, and points are sorted by x-axis before plotting.
+
+Grouped mode is enabled by default. `train_loss_step`, `train_loss_epoch`, and `val_loss` appear as family `loss`; selecting `loss` plots whichever train/val sides exist. Use `a` to switch between step and epoch. On the step axis, validation epoch metrics use the `step` value from their CSV row, which places validation at the training step where it was logged.
+
+## Development
+
+```bash
+micromamba activate ltui
+pytest
+python -m build
+twine check dist/*
 ```
 
-Grouped mode is enabled by default. `train_loss_step`, `train_loss_epoch`, and `val_loss` appear as family `loss`; selecting `loss` plots whichever train/val sides are available. Use `a` to switch the x-axis between step and epoch. On the step axis, validation epoch metrics use the `step` value from their CSV row, which aligns them to the training step where validation was logged.
+The CLI entrypoint is:
 
-## Behavior
-
-- Preferred x-axis: `step`
-- Fallback x-axis: `epoch`
-- Final fallback: row index
-- X-axis can be toggled between `step` and `epoch`
-- Step and epoch axes are anchored at `0`
-- Dark plot theme is enabled by default
-- Config viewer shows runs that have exactly one `.yaml` or `.yml` associated with the version
-- Metric columns: numeric columns except `step` and `epoch`
-- Rows with `NaN` for the selected metric are dropped
-- Points are sorted by x-axis before plotting
-- Smoothing is EMA with alpha `0.2`
-- Log scaling drops nonpositive points and reports the count
-- State is stored per root under `~/.local/state/lightning-tui/`
+```bash
+ltui /path/to/log/root
+```
 
 ## Known Limitations
 
 - CSV files are reread whole during refresh.
-- No manual zoom or pan in v1.
+- Manual zoom and pan are not implemented.
 - Only PyTorch Lightning `CSVLogger` style `metrics.csv` files are targeted.
-- No TensorBoard, WandB, Aim, browser UI, or server mode.
+- TensorBoard, WandB, Aim, browser UI, and server mode are out of scope for v1.

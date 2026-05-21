@@ -3,14 +3,37 @@ requires = ["hatchling>=1.29"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lightning-tui"
+name = "ltui"
 version = "0.1.0"
-description = "Terminal UI for PyTorch Lightning CSVLogger metrics"
+description = "Terminal UI for PyTorch Lightning CSVLogger metrics."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [
-  { name = "lightning-tui contributors" }
+  { name = "Erik Ayari" }
+]
+keywords = [
+  "csvlogger",
+  "metrics",
+  "plotext",
+  "pytorch-lightning",
+  "terminal",
+  "textual",
+  "tui",
+  "visualization",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Visualization",
+  "Topic :: System :: Monitoring",
 ]
 dependencies = [
   "pandas>=2.2",
@@ -21,11 +44,29 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
   "pytest>=8.0",
+  "twine>=6.0",
 ]
 
 [project.scripts]
-ltui = "lightning_tui.cli:main"
+ltui = "ltui.cli:main"
+
+[project.urls]
+Repository = "https://github.com/erik-ayari/ltui"
+Issues = "https://github.com/erik-ayari/ltui/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ltui"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/LICENSE",
+  "/README.md",
+  "/pyproject.toml",
+  "/src",
+  "/tests",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

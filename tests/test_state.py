@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from lightning_tui.discovery import RunVersion
-from lightning_tui.state import UiState, valid_state
+from ltui.discovery import RunVersion
+from ltui.state import UiState, valid_state
 
 
 def test_state_restore_drops_missing_paths_and_metrics(tmp_path: Path) -> None:

@@ -8,7 +8,8 @@ from pathlib import Path
 from .discovery import RunVersion
 
 
-STATE_ROOT = Path.home() / ".local" / "state" / "lightning-tui"
+STATE_ROOT = Path.home() / ".local" / "state" / "ltui"
+LEGACY_STATE_ROOT = Path.home() / ".local" / "state" / "lightning-tui"
 
 
 @dataclass(frozen=True)
@@ -25,15 +26,25 @@ class UiState:
 
 
 def state_path(root: str | Path) -> Path:
+    return state_file(root, STATE_ROOT)
+
+
+def legacy_state_path(root: str | Path) -> Path:
+    return state_file(root, LEGACY_STATE_ROOT)
+
+
+def state_file(root: str | Path, state_root: Path) -> Path:
     resolved = str(Path(root).expanduser().resolve())
     key = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:24]
-    return STATE_ROOT / f"{key}.json"
+    return state_root / f"{key}.json"
 
 
 def load_state(root: str | Path) -> UiState | None:
     path = state_path(root)
     if not path.exists():
-        return None
+        path = legacy_state_path(root)
+        if not path.exists():
+            return None
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):

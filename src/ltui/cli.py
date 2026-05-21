@@ -13,7 +13,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Terminal UI for PyTorch Lightning CSVLogger metrics.",
     )
     parser.add_argument("root", type=Path, help="Log root to scan recursively.")
-    parser.add_argument("--version", action="version", version=f"lightning-tui {__version__}")
+    parser.add_argument("--version", action="version", version=f"ltui {__version__}")
     return parser
 
 

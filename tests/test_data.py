@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from lightning_tui.data import (
+from ltui.data import (
     EPOCH_COLUMN,
     ROW_INDEX_AXIS,
     STEP_COLUMN,
