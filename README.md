@@ -1,5 +1,6 @@
 # ltui
 
+[![PyPI](https://img.shields.io/pypi/v/ltui.svg)](https://pypi.org/project/ltui/)
 [![CI](https://github.com/erik-ayari/ltui/actions/workflows/ci.yml/badge.svg)](https://github.com/erik-ayari/ltui/actions/workflows/ci.yml)
 
 Terminal UI for live and posthoc visualization of PyTorch Lightning `CSVLogger` metrics.
