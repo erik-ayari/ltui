@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from lightning_tui.app import ConfigScreen, LightningTuiApp, SelectorScreen
+from lightning_tui.app import PALETTE, ConfigScreen, LightningTuiApp, SelectorScreen
 
 
 def test_metric_selector_opens_without_shadowing_textual_query() -> None:
@@ -152,5 +152,29 @@ def test_multi_run_plotext_labels_include_runs_and_styles() -> None:
                     "run_b/version_0 train",
                     "run_b/version_0 val",
                 ]
+
+    asyncio.run(run())
+
+
+def test_four_selected_runs_use_distinct_early_colors() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics_paths = []
+            for index in range(4):
+                metrics = root / f"run_{index}" / "version_0" / "metrics.csv"
+                metrics.parent.mkdir(parents=True)
+                metrics.write_text(f"step,train_loss\n0,{1 - index * 0.1}\n")
+                metrics_paths.append(metrics)
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+                app.selected_run_paths = [str(path.resolve()) for path in metrics_paths]
+                app.selected_metrics = ["loss"]
+                colors = [curve.color for curve in app.build_curves()]
+
+                assert colors == list(PALETTE[:4])
+                assert len(set(colors)) == 4
 
     asyncio.run(run())

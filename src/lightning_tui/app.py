@@ -19,7 +19,7 @@ from .plotting import PlotCurve, render_plot
 from .state import UiState, load_state, save_state, valid_state
 
 
-PALETTE = ("blue", "red", "green", "magenta", "cyan", "yellow", "white")
+PALETTE = ("blue+", "orange+", "cyan+", "magenta+", "green+", "red+", "white", "gray+")
 
 
 class SelectorItem:
