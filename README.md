@@ -123,10 +123,3 @@ The CLI entrypoint is:
 ```bash
 ltui /path/to/log/root
 ```
-
-## Known Limitations
-
-- CSV files are reread whole during refresh.
-- Manual zoom and pan are not implemented.
-- Only PyTorch Lightning `CSVLogger` style `metrics.csv` files are targeted.
-- TensorBoard, WandB, Aim, browser UI, and server mode are out of scope for v1.
