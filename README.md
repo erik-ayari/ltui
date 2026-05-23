@@ -6,24 +6,26 @@ TensorBoard-like live monitoring for PyTorch Lightning `CSVLogger` metrics, dire
 
 `ltui` turns Lightning `metrics.csv` files into a focused terminal plot for live monitoring, inspection, and run comparison, similar in spirit to tools like TensorBoard. Because it runs entirely in the terminal, it is especially useful for headless monitoring on remote machines over SSH, inside tmux, and without a browser or server process.
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="docs/screenshots/multiplot.png" alt="Multiplot grid in ltui" width="100%">
-    </td>
-    <td width="50%">
-      <img src="docs/screenshots/loss-log-scale-comparison.png" alt="Run comparison plot in ltui" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="docs/screenshots/metric-selector.png" alt="Metric selector in ltui" width="100%">
-    </td>
-    <td width="50%">
-      <img src="docs/screenshots/config-viewer.png" alt="YAML config viewer in ltui" width="100%">
-    </td>
-  </tr>
-</table>
+<p>
+  <a href="docs/screenshots/multiplot.png">
+    <img src="docs/screenshots/multiplot.png" alt="Multiplot grid in ltui" width="100%">
+  </a>
+</p>
+<p>
+  <a href="docs/screenshots/loss-log-scale-comparison.png">
+    <img src="docs/screenshots/loss-log-scale-comparison.png" alt="Run comparison plot in ltui" width="100%">
+  </a>
+</p>
+<p>
+  <a href="docs/screenshots/metric-selector.png">
+    <img src="docs/screenshots/metric-selector.png" alt="Metric selector in ltui" width="100%">
+  </a>
+</p>
+<p>
+  <a href="docs/screenshots/config-viewer.png">
+    <img src="docs/screenshots/config-viewer.png" alt="YAML config viewer in ltui" width="100%">
+  </a>
+</p>
 
 ## Highlights
 
