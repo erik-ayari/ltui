@@ -6,11 +6,14 @@ from ltui.plotting import (
     LegendEntry,
     PlotBounds,
     PlotCurve,
+    PlotPanel,
     color_active_run_labels,
     draw_legend_entries,
+    grid_layout,
     integer_ticks,
     plot_val,
     prepare_curve,
+    render_plot_grid,
     render_plot,
 )
 
@@ -115,3 +118,64 @@ def test_active_run_labels_are_colored_green_after_render() -> None:
     colored = color_active_run_labels(text, [LegendEntry("run_a", "blue", True), LegendEntry("run_b", "red", False)])
 
     assert colored == "\033[38;5;10mrun_a\033[39m run_b run_a"
+
+
+def test_single_run_still_gets_run_legend_entry() -> None:
+    curves = [
+        PlotCurve(
+            "train",
+            (0.0,),
+            (1.0,),
+            color="blue",
+            role="train",
+            run_label="stage3/version_0",
+            run_status="active",
+            style_label="train",
+        )
+    ]
+    bounds = PlotBounds(x_left=0, x_right=10, y_lower=0, y_upper=1)
+
+    with patch("ltui.plotting.plt.plot") as plot:
+        entries = draw_legend_entries(curves, bounds, dark_mode=True)
+
+    assert entries == [LegendEntry("stage3/version_0", "blue", True)]
+    assert plot.call_args_list[0].kwargs["label"] == "stage3/version_0"
+
+
+def test_grid_layout_pages_when_terminal_is_too_small() -> None:
+    layout = grid_layout(total=5, width=80, height=20)
+
+    assert layout.page_size < 5
+    assert layout.page_count > 1
+
+
+def test_render_plot_grid_marks_selected_panel() -> None:
+    panel = PlotPanel(
+        title="loss",
+        curves=[PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))],
+        x_label="step",
+        y_label="loss",
+    )
+
+    result = render_plot_grid([panel], width=80, height=20, selected_index=0)
+
+    assert "┌" in result.text
+    assert "┘" in result.text
+
+
+def test_render_plot_grid_shows_legend_only_in_top_left_panel() -> None:
+    panels = [
+        PlotPanel(
+            title=f"metric_{index}",
+            curves=[PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8), role="train", style_label="train")],
+            x_label="step",
+        )
+        for index in range(4)
+    ]
+
+    with patch("ltui.plotting.render_plot") as render:
+        render.return_value.text = "plot"
+        render.return_value.status_messages = ()
+        render_plot_grid(panels, width=120, height=40)
+
+    assert [call.kwargs["show_legend"] for call in render.call_args_list] == [True, False, False, False]

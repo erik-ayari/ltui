@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 
 import plotext as plt
 
@@ -25,6 +26,36 @@ class PlotResult:
 
 
 @dataclass(frozen=True)
+class PlotPanel:
+    title: str
+    curves: list[PlotCurve]
+    x_label: str
+    y_label: str = ""
+    show_legend: bool = True
+    smoothing: bool = False
+    log_x: bool = False
+    log_y: bool = False
+    x_min: float | None = None
+    dark_mode: bool = True
+
+
+@dataclass(frozen=True)
+class GridLayout:
+    columns: int
+    rows: int
+    page_size: int
+    page_count: int
+
+
+@dataclass(frozen=True)
+class GridResult:
+    text: str
+    status_messages: tuple[str, ...]
+    layout: GridLayout
+    page: int
+
+
+@dataclass(frozen=True)
 class PlotBounds:
     x_left: float
     x_right: float
@@ -37,6 +68,9 @@ class LegendEntry:
     label: str
     color: str
     active: bool = False
+
+
+ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def render_plot(
@@ -52,6 +86,7 @@ def render_plot(
     log_y: bool = False,
     x_min: float | None = None,
     dark_mode: bool = True,
+    show_legend: bool = True,
 ) -> PlotResult:
     prepared: list[PlotCurve] = []
     dropped_x = 0
@@ -98,10 +133,146 @@ def render_plot(
             plot_val(curve)
         else:
             plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="braille")
-    legend_entries = draw_legend_entries(prepared, bounds, dark_mode)
+    legend_entries = draw_legend_entries(prepared, bounds, dark_mode) if show_legend else []
 
     text = color_active_run_labels(plt.build(), legend_entries)
     return PlotResult(text=text, status_messages=tuple(messages))
+
+
+def render_plot_grid(
+    panels: list[PlotPanel],
+    *,
+    width: int,
+    height: int,
+    page: int = 0,
+    selected_index: int | None = None,
+) -> GridResult:
+    layout = grid_layout(len(panels), width, height)
+    page = min(max(page, 0), layout.page_count - 1)
+    first = page * layout.page_size
+    visible = panels[first : first + layout.page_size]
+    gap = 1
+    cell_width = max((width - gap * (layout.columns - 1)) // layout.columns, 1)
+    cell_height = max((height - gap * (layout.rows - 1)) // layout.rows, 1)
+    rows: list[str] = []
+    messages: list[str] = []
+
+    for row in range(layout.rows):
+        cells: list[list[str]] = []
+        for column in range(layout.columns):
+            panel_index = first + row * layout.columns + column
+            panel = visible[row * layout.columns + column] if row * layout.columns + column < len(visible) else None
+            selected = selected_index == panel_index
+            if panel is None:
+                cells.append(empty_cell(cell_width, cell_height))
+                continue
+            rendered = render_plot(
+                panel.curves,
+                width=max(cell_width - 2, 30),
+                height=max(cell_height - 2, 8),
+                title=panel.title,
+                x_label=panel.x_label,
+                y_label=panel.y_label,
+                smoothing=panel.smoothing,
+                log_x=panel.log_x,
+                log_y=panel.log_y,
+                x_min=panel.x_min,
+                dark_mode=panel.dark_mode,
+                show_legend=row == 0 and column == 0,
+            )
+            messages.extend(rendered.status_messages)
+            cells.append(frame_cell(rendered.text, cell_width, cell_height, selected))
+        for line_index in range(cell_height):
+            rows.append((" " * gap).join(cell[line_index] for cell in cells))
+        if row < layout.rows - 1:
+            rows.extend("" for _ in range(gap))
+
+    return GridResult(
+        text="\n".join(rows),
+        status_messages=tuple(dict.fromkeys(messages)),
+        layout=layout,
+        page=page,
+    )
+
+
+def grid_layout(total: int, width: int, height: int) -> GridLayout:
+    total = max(total, 1)
+    min_width = 44
+    min_height = 14
+    max_columns = max(1, width // min_width)
+    max_rows = max(1, height // min_height)
+    capacity = max(1, max_columns * max_rows)
+    page_size = min(total, capacity)
+    best: tuple[float, int, int] | None = None
+
+    for columns in range(1, max_columns + 1):
+        rows = math.ceil(page_size / columns)
+        if rows > max_rows:
+            continue
+        cell_width = width / columns
+        cell_height = height / rows
+        shape_score = abs((cell_width / max(cell_height, 1)) - 3.2)
+        empty_score = (columns * rows - page_size) * 0.35
+        score = shape_score + empty_score
+        if best is None or score < best[0]:
+            best = (score, columns, rows)
+
+    if best is None:
+        columns = max_columns
+        rows = max_rows
+    else:
+        columns = best[1]
+        rows = best[2]
+    return GridLayout(
+        columns=columns,
+        rows=rows,
+        page_size=columns * rows,
+        page_count=math.ceil(total / (columns * rows)),
+    )
+
+
+def frame_cell(text: str, width: int, height: int, selected: bool) -> list[str]:
+    inner_width = max(width - 2, 1)
+    inner_height = max(height - 2, 1)
+    lines = fit_lines(text.splitlines(), inner_width, inner_height)
+    if not selected:
+        return [fit_plain("", width)] + [f" {line} " for line in lines] + [fit_plain("", width)]
+
+    accent = "\033[38;5;214m"
+    reset = "\033[39m"
+    top = f"{accent}┌{'─' * inner_width}┐{reset}"
+    bottom = f"{accent}└{'─' * inner_width}┘{reset}"
+    return [top] + [f"{accent}│{reset}{line}{accent}│{reset}" for line in lines] + [bottom]
+
+
+def empty_cell(width: int, height: int) -> list[str]:
+    return [fit_plain("", width) for _ in range(height)]
+
+
+def fit_lines(lines: list[str], width: int, height: int) -> list[str]:
+    fitted = [fit_ansi_line(line, width) for line in lines[:height]]
+    while len(fitted) < height:
+        fitted.append(fit_plain("", width))
+    return fitted
+
+
+def fit_ansi_line(line: str, width: int) -> str:
+    visible = visible_length(line)
+    if visible > width:
+        return fit_plain(strip_ansi(line), width)
+    return line + " " * (width - visible)
+
+
+def fit_plain(line: str, width: int) -> str:
+    return line[:width].ljust(width)
+
+
+def visible_length(line: str) -> int:
+    return len(strip_ansi(line))
+
+
+def strip_ansi(line: str) -> str:
+    return ansi_pattern.sub("", line)
 
 
 def prepare_curve(
@@ -238,10 +409,6 @@ def draw_legend_entries(curves: list[PlotCurve], bounds: PlotBounds, dark_mode: 
 
 
 def run_legend_entries(curves: list[PlotCurve]) -> list[LegendEntry]:
-    run_count = len({curve.run_label for curve in curves if curve.run_label is not None})
-    if run_count <= 1:
-        return []
-
     entries: list[LegendEntry] = []
     seen: set[str] = set()
     for curve in curves:

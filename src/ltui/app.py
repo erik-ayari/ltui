@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from rapidfuzz import fuzz
@@ -15,24 +15,41 @@ from textual.widgets.option_list import Option
 
 from .data import AxisMode, RunMetrics, load_run_metrics, metric_series, resolve_family, resolve_x_axis
 from .discovery import RunVersion, discover_runs
-from .plotting import PlotCurve, render_plot
+from .plotting import GridLayout, PlotCurve, PlotPanel, render_plot, render_plot_grid
 from .state import UiState, load_state, save_state, valid_state
 
 
 PALETTE = ("blue+", "orange+", "cyan+", "magenta+", "green+", "red+", "white", "gray+")
 
 
+@dataclass(frozen=True)
+class PlotSettings:
+    x_axis_mode: AxisMode = "step"
+    smoothing: bool = False
+    log_x: bool = False
+    log_y: bool = False
+
+
 class SelectorItem:
-    def __init__(self, key: str, label: str, search_text: str | None = None) -> None:
+    def __init__(
+        self,
+        key: str,
+        label: str,
+        search_text: str | None = None,
+        selection_keys: tuple[str, ...] | None = None,
+    ) -> None:
         self.key = key
         self.label = label
         self.search_text = search_text or label
+        self.selection_keys = selection_keys or (key,)
 
 
 class SelectorScreen(ModalScreen[list[str] | None]):
     BINDINGS = [
         Binding("/", "focus_search", "Search", show=False),
         Binding("space", "toggle", "Toggle", show=False),
+        Binding("left", "previous_model", "Previous model", show=False),
+        Binding("right", "next_model", "Next model", show=False),
         Binding("enter", "apply", "Apply", show=False),
         Binding("escape", "cancel", "Cancel", show=False),
     ]
@@ -66,10 +83,17 @@ class SelectorScreen(ModalScreen[list[str] | None]):
         if option.id is None:
             return
         key = str(option.id)
-        if key in self.selected:
-            self.selected.remove(key)
+        item = self.item_by_key(key)
+        if item is None:
+            return
+        if all(selection_key in self.selected for selection_key in item.selection_keys):
+            for selection_key in item.selection_keys:
+                if selection_key in self.selected:
+                    self.selected.remove(selection_key)
         else:
-            self.selected.append(key)
+            for selection_key in item.selection_keys:
+                if selection_key not in self.selected:
+                    self.selected.append(selection_key)
         self.refresh_options(highlight_key=key)
 
     def action_apply(self) -> None:
@@ -77,7 +101,9 @@ class SelectorScreen(ModalScreen[list[str] | None]):
         if not self.selected and option_list.highlighted is not None:
             option = option_list.get_option_at_index(option_list.highlighted)
             if option.id is not None:
-                self.selected.append(str(option.id))
+                item = self.item_by_key(str(option.id))
+                if item is not None:
+                    self.selected.extend(item.selection_keys)
         self.dismiss(self.selected)
 
     def action_cancel(self) -> None:
@@ -109,6 +135,26 @@ class SelectorScreen(ModalScreen[list[str] | None]):
                     break
         option_list.highlighted = highlight
 
+    def action_previous_model(self) -> None:
+        self.jump_model(-1)
+
+    def action_next_model(self) -> None:
+        self.jump_model(1)
+
+    def jump_model(self, direction: int) -> None:
+        option_list = self.query_one(OptionList)
+        if option_list.highlighted is None:
+            return
+        model_indices = [index for index, item in enumerate(self.filtered_items()) if item.key.startswith("model:")]
+        if direction > 0:
+            candidates = [index for index in model_indices if index > option_list.highlighted]
+            if candidates:
+                option_list.highlighted = candidates[0]
+        else:
+            candidates = [index for index in model_indices if index < option_list.highlighted]
+            if candidates:
+                option_list.highlighted = candidates[-1]
+
     def filtered_items(self) -> list[SelectorItem]:
         if not self.search_query:
             return self.items
@@ -119,21 +165,34 @@ class SelectorScreen(ModalScreen[list[str] | None]):
         return [item for score, index, item in sorted(scored, key=lambda value: (-value[0], value[1])) if score >= 35]
 
     def format_label(self, item: SelectorItem) -> str:
-        marker = "[x]" if item.key in self.selected else "[ ]"
+        selected_count = sum(selection_key in self.selected for selection_key in item.selection_keys)
+        if selected_count == len(item.selection_keys):
+            marker = "[x]"
+        elif selected_count:
+            marker = "[-]"
+        else:
+            marker = "[ ]"
         return f"{marker} {item.label}"
+
+    def item_by_key(self, key: str) -> SelectorItem | None:
+        return next((item for item in self.items if item.key == key), None)
 
 
 class ConfigItem:
-    def __init__(self, run: RunVersion) -> None:
-        self.run = run
-        self.key = str(run.metrics_csv_path)
-        self.label = run.display_name
-        self.search_text = f"{run.display_name} {run.metrics_csv_path} {run.config_yaml_path}"
+    def __init__(self, key: str, label: str, runs: tuple[RunVersion, ...], search_text: str | None = None) -> None:
+        self.key = key
+        self.label = label
+        self.runs = runs
+        self.search_text = search_text or " ".join(
+            f"{run.display_name} {run.metrics_csv_path} {run.config_yaml_path}" for run in runs
+        )
 
 
 class ConfigScreen(ModalScreen[None]):
     BINDINGS = [
         Binding("/", "focus_search", "Search", show=False),
+        Binding("left", "previous_model", "Previous model", show=False),
+        Binding("right", "next_model", "Next model", show=False),
         Binding("enter", "close", "Close", show=False),
         Binding("escape", "close", "Close", show=False),
     ]
@@ -192,6 +251,28 @@ class ConfigScreen(ModalScreen[None]):
         if option_list.option_count:
             option_list.highlighted = 0
 
+    def action_previous_model(self) -> None:
+        self.jump_model(-1)
+
+    def action_next_model(self) -> None:
+        self.jump_model(1)
+
+    def jump_model(self, direction: int) -> None:
+        option_list = self.query_one(OptionList)
+        if option_list.highlighted is None:
+            return
+        model_indices = [index for index, item in enumerate(self.filtered_items()) if item.key.startswith("model:")]
+        if direction > 0:
+            candidates = [index for index in model_indices if index > option_list.highlighted]
+            if candidates:
+                option_list.highlighted = candidates[0]
+                self.update_preview()
+        else:
+            candidates = [index for index in model_indices if index < option_list.highlighted]
+            if candidates:
+                option_list.highlighted = candidates[-1]
+                self.update_preview()
+
     def filtered_items(self) -> list[ConfigItem]:
         if not self.search_query:
             return self.items
@@ -204,14 +285,10 @@ class ConfigScreen(ModalScreen[None]):
     def update_preview(self) -> None:
         text_area = self.query_one(TextArea)
         selected = self.selected_item()
-        if selected is None or selected.run.config_yaml_path is None:
+        if selected is None:
             text_area.load_text("No config selected.")
             return
-        try:
-            text = selected.run.config_yaml_path.read_text(errors="replace")
-        except OSError as exc:
-            text = f"Could not read {selected.run.config_yaml_path}\n\n{exc}"
-        text_area.load_text(f"# {selected.run.display_name}\n# {selected.run.config_yaml_path}\n\n{text}")
+        text_area.load_text(config_preview_text(selected.runs))
 
     def selected_item(self) -> ConfigItem | None:
         option_list = self.query_one(OptionList)
@@ -244,7 +321,9 @@ class LightningTuiApp(App[None]):
     }
 
     #footer {
-        height: 1;
+        height: auto;
+        min-height: 1;
+        max-height: 2;
         padding: 0 1;
         background: $surface;
         color: $text-muted;
@@ -339,7 +418,13 @@ class LightningTuiApp(App[None]):
         Binding("s", "toggle_smoothing", "Smoothing"),
         Binding("x", "toggle_log_x", "Log x"),
         Binding("y", "toggle_log_y", "Log y"),
-        Binding("space", "toggle_pause", "Pause"),
+        Binding("space", "open_multiplot", "Multiplot"),
+        Binding("left", "multiplot_left", "Left", show=False),
+        Binding("right", "multiplot_right", "Right", show=False),
+        Binding("up", "multiplot_up", "Up", show=False),
+        Binding("down", "multiplot_down", "Down", show=False),
+        Binding("enter", "focus_multiplot", "Focus", show=False),
+        Binding("escape", "clear_multiplot_selection", "Clear", show=False),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -357,7 +442,11 @@ class LightningTuiApp(App[None]):
         self.smoothing = False
         self.log_x = False
         self.log_y = False
-        self.paused = False
+        self.multiplot = False
+        self.multiplot_selection: int | None = None
+        self.multiplot_page = 0
+        self.multiplot_layout = GridLayout(columns=1, rows=1, page_size=1, page_count=1)
+        self.metric_settings: dict[str, PlotSettings] = {}
         self.status_message = "starting"
         self.refreshing = False
 
@@ -367,30 +456,22 @@ class LightningTuiApp(App[None]):
         yield Static("", id="footer")
 
     def on_mount(self) -> None:
-        self.query_one("#footer", Static).update(keybinding_bar())
+        self.update_footer()
         asyncio.create_task(self.refresh_snapshot(initial=True))
         self.set_interval(1.5, self.schedule_live_refresh)
 
-    def on_key(self, event) -> None:
-        if event.character == "R":
-            event.stop()
-            asyncio.create_task(self.refresh_snapshot(force=True))
-
     def schedule_live_refresh(self) -> None:
-        if not self.paused and not self.refreshing:
+        if not self.refreshing:
             asyncio.create_task(self.refresh_snapshot())
 
-    async def refresh_snapshot(self, *, initial: bool = False, force: bool = False) -> None:
+    async def refresh_snapshot(self, *, initial: bool = False) -> None:
         if self.refreshing:
             return
         self.refreshing = True
-        if force:
-            self.status_message = "rescanning"
-            self.render_current()
         try:
             runs, metrics_cache = await asyncio.to_thread(build_snapshot, self.root)
             self.apply_snapshot(runs, metrics_cache, initial)
-            self.status_message = "live" if not self.paused else "paused"
+            self.status_message = "live"
         except Exception as exc:
             self.status_message = f"error: {exc}"
         finally:
@@ -440,58 +521,125 @@ class LightningTuiApp(App[None]):
             self.selected_metrics = [self.default_metric_choice(choices)]
         if self.active_metric_index >= len(self.selected_metrics):
             self.active_metric_index = 0
+        self.metric_settings = {metric: settings for metric, settings in self.metric_settings.items() if metric in self.selected_metrics}
+        self.clamp_multiplot_selection()
 
     def render_current(self) -> None:
         plot = self.query_one("#plot", Static)
         if not self.runs:
             self.update_header()
             plot.update(self.empty_text())
+            self.update_footer()
             return
         if not self.selected_metrics:
             self.update_header()
             plot.update("No numeric metrics found in selected run.")
+            self.update_footer()
             return
 
-        curves = self.build_curves()
         size = plot.size
+        if self.multiplot:
+            self.render_multiplot(plot, size)
+        else:
+            self.render_focused_plot(plot, size)
+        self.persist_state()
+
+    def render_focused_plot(self, plot: Static, size) -> None:
         active_metric = self.active_metric()
-        x_axis = self.current_x_axis()
+        if active_metric is None:
+            plot.update("No numeric metrics found in selected run.")
+            return
+        settings = self.settings_for_metric(active_metric)
+        x_axis = self.current_x_axis(settings)
         result = render_plot(
-            curves,
+            self.build_curves(active_metric, settings),
             width=max(size.width - 2, 60),
             height=max(size.height - 2, 16),
-            title=active_metric or "",
+            title=active_metric,
             x_label=x_axis,
-            y_label=active_metric,
-            smoothing=self.smoothing,
-            log_x=self.log_x,
-            log_y=self.log_y,
+            y_label="",
+            smoothing=settings.smoothing,
+            log_x=settings.log_x,
+            log_y=settings.log_y,
             x_min=0 if x_axis in {"step", "epoch"} else None,
             dark_mode=self.dark_mode,
         )
         if result.status_messages:
             self.status_message = " | ".join(result.status_messages)
         elif self.status_message.startswith("log-"):
-            self.status_message = "paused" if self.paused else "live"
+            self.status_message = "live"
         self.update_header()
         plot.update(Text.from_ansi(result.text))
-        self.persist_state()
+        self.update_footer()
+
+    def render_multiplot(self, plot: Static, size) -> None:
+        panels = [self.plot_panel(metric) for metric in self.selected_metrics]
+        result = render_plot_grid(
+            panels,
+            width=max(size.width - 2, 60),
+            height=max(size.height - 2, 16),
+            page=self.multiplot_page,
+            selected_index=self.multiplot_selection,
+        )
+        self.multiplot_layout = result.layout
+        self.multiplot_page = result.page
+        if result.status_messages:
+            self.status_message = " | ".join(result.status_messages)
+        elif self.status_message.startswith("log-"):
+            self.status_message = "live"
+        self.update_header()
+        plot.update(Text.from_ansi(result.text))
+        self.update_footer()
+
+    def plot_panel(self, metric: str) -> PlotPanel:
+        settings = self.settings_for_metric(metric)
+        x_axis = self.current_x_axis(settings)
+        return PlotPanel(
+            title=metric,
+            curves=self.build_curves(metric, settings),
+            x_label=x_axis,
+            smoothing=settings.smoothing,
+            log_x=settings.log_x,
+            log_y=settings.log_y,
+            x_min=0 if x_axis in {"step", "epoch"} else None,
+            dark_mode=self.dark_mode,
+        )
 
     def update_header(self) -> None:
         header = self.query_one("#header", Static)
-        run_names = [self.run_by_path(path).display_name for path in self.selected_run_paths if self.run_by_path(path)]
-        run_text = ", ".join(run_names[:3]) if run_names else "none"
-        if len(run_names) > 3:
-            run_text += f" +{len(run_names) - 3}"
-        statuses = sorted({self.run_by_path(path).status for path in self.selected_run_paths if self.run_by_path(path)})
-        status_text = "/".join(statuses) if statuses else "no runs"
-        live = "paused" if self.paused else "live"
-        run_mode = "compare" if len(self.selected_run_paths) > 1 else "single"
         header.update(
-            f"runs: {run_text}\n"
-            f"metric: {self.active_metric() or 'none'}  mode: {run_mode}  x-axis: {self.current_x_axis()}  theme: {theme_name(self.dark_mode)}  status: {status_text}/{live}  smooth: {onoff(self.smoothing)}  log-x: {onoff(self.log_x)}  log-y: {onoff(self.log_y)}\n"
-            f"{self.status_message}"
+            header_bar(self.data_summary_text(), self.config_count(), self.total_metric_count())
         )
+
+    def data_summary_text(self) -> Text:
+        groups = group_runs_by_model(self.runs)
+        if not groups:
+            return Text("none")
+
+        text = Text()
+        for group_index, (model, runs) in enumerate(groups):
+            if group_index:
+                text.append(", ")
+            text.append(model)
+            text.append(" (")
+            self.append_version_summary(text, runs)
+            text.append(")")
+        return text
+
+    def append_version_summary(self, text: Text, runs: list[RunVersion]) -> None:
+        visible_runs = runs if len(runs) <= 3 else runs[:2]
+        for index, run in enumerate(visible_runs):
+            if index:
+                text.append(", ")
+            text.append(run_version_label(run), style="green" if run.status == "active" else "")
+        if len(runs) > 3:
+            text.append(f" and {len(runs) - 2} more")
+
+    def config_count(self) -> int:
+        return len({run.config_yaml_path for run in self.runs if run.config_yaml_path is not None})
+
+    def total_metric_count(self) -> int:
+        return len(self.metric_choices_for_runs([str(run.metrics_csv_path) for run in self.runs]))
 
     def empty_text(self) -> str:
         return (
@@ -500,14 +648,28 @@ class LightningTuiApp(App[None]):
             "  lightning_logs/version_0/metrics.csv\n"
             "  run_a/version_0/metrics.csv\n"
             "  run_a/lightning_logs/version_0/metrics.csv\n\n"
-            "Press R to rescan or q to quit."
+            "Live discovery runs automatically. Press q to quit."
         )
 
-    def build_curves(self) -> list[PlotCurve]:
+    def update_footer(self) -> None:
+        footer = self.query_one("#footer", Static)
+        footer.update(keybinding_bar(self.page_indicator(), widget_width(footer)))
+
+    def page_indicator(self) -> str | None:
+        if not self.multiplot or self.multiplot_layout.page_count <= 1:
+            return None
+        labels = []
+        for page in range(self.multiplot_layout.page_count):
+            label = str(page + 1)
+            labels.append(f"[{label}]" if page == self.multiplot_page else label)
+        return "pages " + " ".join(labels)
+
+    def build_curves(self, metric: str | None = None, settings: PlotSettings | None = None) -> list[PlotCurve]:
         curves: list[PlotCurve] = []
-        active_metric = self.active_metric()
-        if active_metric is None:
+        metric = metric or self.active_metric()
+        if metric is None:
             return curves
+        settings = settings or self.settings_for_metric(metric)
 
         for run_index, run_path in enumerate(self.selected_run_paths):
             metrics = self.metrics_cache.get(run_path)
@@ -516,12 +678,12 @@ class LightningTuiApp(App[None]):
                 continue
             color = PALETTE[run_index % len(PALETTE)]
             metric_roles = (
-                resolve_family(metrics, active_metric, self.x_axis_mode)
+                resolve_family(metrics, metric, settings.x_axis_mode)
                 if self.grouped_mode
-                else ((active_metric, "raw"),)
+                else ((metric, "raw"),)
             )
             for metric_name, role in metric_roles:
-                series = metric_series(metrics, metric_name, self.x_axis_mode)
+                series = metric_series(metrics, metric_name, settings.x_axis_mode)
                 if not series.x:
                     continue
                 label = self.curve_label(run, metric_name, role)
@@ -532,7 +694,7 @@ class LightningTuiApp(App[None]):
                         y=series.y,
                         color=color,
                         role=role,
-                        run_label=run.display_name,
+                        run_label=run_display_name(run),
                         run_status=run.status,
                         style_label=self.style_label(metric_name, role),
                     )
@@ -542,8 +704,8 @@ class LightningTuiApp(App[None]):
     def curve_label(self, run: RunVersion, metric_name: str, role: str) -> str:
         style_label = self.style_label(metric_name, role)
         if self.grouped_mode and role in {"train", "val"}:
-            return style_label if len(self.selected_run_paths) == 1 else f"{run.display_name} {style_label}"
-        return metric_name if len(self.selected_run_paths) == 1 else f"{run.display_name} {metric_name}"
+            return style_label if len(self.selected_run_paths) == 1 else f"{run_display_name(run)} {style_label}"
+        return metric_name if len(self.selected_run_paths) == 1 else f"{run_display_name(run)} {metric_name}"
 
     def style_label(self, metric_name: str, role: str) -> str:
         if self.grouped_mode and role in {"train", "val"}:
@@ -585,15 +747,34 @@ class LightningTuiApp(App[None]):
                 raw.update(metrics.metric_names)
         return raw
 
-    def current_x_axis(self) -> str:
+    def current_x_axis(self, settings: PlotSettings | None = None) -> str:
+        settings = settings or self.global_settings()
         axes: list[str] = []
         for run_path in self.selected_run_paths:
             metrics = self.metrics_cache.get(run_path)
             if metrics is not None:
-                axis = resolve_x_axis(metrics.frame, self.x_axis_mode)
+                axis = resolve_x_axis(metrics.frame, settings.x_axis_mode)
                 if axis not in axes:
                     axes.append(axis)
         return axes[0] if len(axes) == 1 else "x"
+
+    def global_settings(self) -> PlotSettings:
+        return PlotSettings(
+            x_axis_mode=self.x_axis_mode,
+            smoothing=self.smoothing,
+            log_x=self.log_x,
+            log_y=self.log_y,
+        )
+
+    def settings_for_metric(self, metric: str) -> PlotSettings:
+        return self.metric_settings.get(metric, self.global_settings())
+
+    def selected_multiplot_metric(self) -> str | None:
+        if self.multiplot_selection is None:
+            return None
+        if 0 <= self.multiplot_selection < len(self.selected_metrics):
+            return self.selected_metrics[self.multiplot_selection]
+        return None
 
     def active_metric(self) -> str | None:
         if not self.selected_metrics:
@@ -637,21 +818,17 @@ class LightningTuiApp(App[None]):
         if not self.selected_metrics and choices:
             self.selected_metrics = [self.default_metric_choice(tuple(choices))]
         self.active_metric_index = 0
+        self.metric_settings = {metric: settings for metric, settings in self.metric_settings.items() if metric in self.selected_metrics}
+        self.multiplot_selection = None
+        self.multiplot_page = 0
         self.render_current()
 
     def action_open_run_selector(self) -> None:
-        items = [
-            SelectorItem(
-                str(run.metrics_csv_path),
-                f"{run.display_name}  {run.status}",
-                f"{run.display_name} {run.metrics_csv_path}",
-            )
-            for run in self.runs
-        ]
+        items = run_selector_items(self.runs)
         self.push_screen(SelectorScreen("Runs", items, self.selected_run_paths), self.apply_run_selection)
 
     def action_open_config_selector(self) -> None:
-        items = [ConfigItem(run) for run in self.runs if run.config_yaml_path is not None]
+        items = config_items(self.runs)
         if not items:
             self.status_message = "no unique yaml configs found"
             self.render_current()
@@ -670,6 +847,9 @@ class LightningTuiApp(App[None]):
         if not self.selected_metrics and choices:
             self.selected_metrics = [self.default_metric_choice(choices)]
         self.active_metric_index = 0
+        self.metric_settings = {metric: settings for metric, settings in self.metric_settings.items() if metric in self.selected_metrics}
+        self.multiplot_selection = None
+        self.multiplot_page = 0
         self.render_current()
 
     def action_next_metric(self) -> None:
@@ -683,8 +863,16 @@ class LightningTuiApp(App[None]):
             self.render_current()
 
     def action_toggle_x_axis(self) -> None:
-        self.x_axis_mode = "epoch" if self.x_axis_mode == "step" else "step"
-        self.status_message = f"x-axis: {self.x_axis_mode}"
+        metric = self.selected_multiplot_metric()
+        if metric is None:
+            self.x_axis_mode = "epoch" if self.x_axis_mode == "step" else "step"
+            self.metric_settings.clear()
+            self.status_message = f"x-axis: {self.x_axis_mode}"
+        else:
+            settings = self.settings_for_metric(metric)
+            next_axis = "epoch" if settings.x_axis_mode == "step" else "step"
+            self.metric_settings[metric] = replace(settings, x_axis_mode=next_axis)
+            self.status_message = f"{metric}: x-axis {next_axis}"
         self.render_current()
 
     def action_toggle_dark_mode(self) -> None:
@@ -693,21 +881,112 @@ class LightningTuiApp(App[None]):
         self.render_current()
 
     def action_toggle_smoothing(self) -> None:
-        self.smoothing = not self.smoothing
+        metric = self.selected_multiplot_metric()
+        if metric is None:
+            self.smoothing = not self.smoothing
+            self.metric_settings.clear()
+        else:
+            settings = self.settings_for_metric(metric)
+            self.metric_settings[metric] = replace(settings, smoothing=not settings.smoothing)
+            self.status_message = f"{metric}: smooth {onoff(not settings.smoothing)}"
         self.render_current()
 
     def action_toggle_log_x(self) -> None:
-        self.log_x = not self.log_x
+        metric = self.selected_multiplot_metric()
+        if metric is None:
+            self.log_x = not self.log_x
+            self.metric_settings.clear()
+        else:
+            settings = self.settings_for_metric(metric)
+            self.metric_settings[metric] = replace(settings, log_x=not settings.log_x)
+            self.status_message = f"{metric}: log-x {onoff(not settings.log_x)}"
         self.render_current()
 
     def action_toggle_log_y(self) -> None:
-        self.log_y = not self.log_y
+        metric = self.selected_multiplot_metric()
+        if metric is None:
+            self.log_y = not self.log_y
+            self.metric_settings.clear()
+        else:
+            settings = self.settings_for_metric(metric)
+            self.metric_settings[metric] = replace(settings, log_y=not settings.log_y)
+            self.status_message = f"{metric}: log-y {onoff(not settings.log_y)}"
         self.render_current()
 
-    def action_toggle_pause(self) -> None:
-        self.paused = not self.paused
-        self.status_message = "paused" if self.paused else "live"
+    def action_open_multiplot(self) -> None:
+        if not self.selected_metrics:
+            return
+        self.multiplot = True
+        self.multiplot_selection = None
+        self.multiplot_page = 0
+        self.status_message = "multiplot"
         self.render_current()
+
+    def action_multiplot_left(self) -> None:
+        self.move_multiplot_selection(0, -1)
+
+    def action_multiplot_right(self) -> None:
+        self.move_multiplot_selection(0, 1)
+
+    def action_multiplot_up(self) -> None:
+        self.move_multiplot_selection(-1, 0)
+
+    def action_multiplot_down(self) -> None:
+        self.move_multiplot_selection(1, 0)
+
+    def action_focus_multiplot(self) -> None:
+        if not self.multiplot:
+            return
+        if self.multiplot_selection is None:
+            return
+        self.active_metric_index = self.multiplot_selection
+        self.multiplot = False
+        self.multiplot_selection = None
+        self.status_message = f"focused: {self.active_metric()}"
+        self.render_current()
+
+    def action_clear_multiplot_selection(self) -> None:
+        if not self.multiplot or self.multiplot_selection is None:
+            return
+        self.multiplot_selection = None
+        self.render_current()
+
+    def move_multiplot_selection(self, row_delta: int, column_delta: int) -> None:
+        if not self.multiplot or not self.selected_metrics:
+            return
+        self.clamp_multiplot_selection()
+        if self.multiplot_selection is None:
+            self.multiplot_selection = self.multiplot_page * self.multiplot_layout.page_size
+            self.render_current()
+            return
+
+        columns = self.multiplot_layout.columns
+        page_size = self.multiplot_layout.page_size
+        page_start = self.multiplot_page * page_size
+        local = self.multiplot_selection - page_start
+        row = local // columns
+        column = local % columns
+        next_index = page_start + (row + row_delta) * columns + column + column_delta
+
+        if column_delta > 0 and (local == page_size - 1 or next_index >= min(page_start + page_size, len(self.selected_metrics))):
+            next_index = min(page_start + page_size, len(self.selected_metrics) - 1)
+        elif column_delta < 0 and local == 0:
+            next_index = max(page_start - 1, 0)
+        elif row_delta != 0 and not (page_start <= next_index < min(page_start + page_size, len(self.selected_metrics))):
+            next_index = self.multiplot_selection
+
+        self.multiplot_selection = min(max(next_index, 0), len(self.selected_metrics) - 1)
+        self.multiplot_page = self.multiplot_selection // max(page_size, 1)
+        self.render_current()
+
+    def clamp_multiplot_selection(self) -> None:
+        if not self.selected_metrics:
+            self.multiplot_selection = None
+            self.multiplot_page = 0
+            return
+        if self.multiplot_selection is not None:
+            self.multiplot_selection = min(self.multiplot_selection, len(self.selected_metrics) - 1)
+        self.multiplot_page = min(max(self.multiplot_page, 0), self.multiplot_layout.page_count - 1)
 
 
 def build_snapshot(root: Path) -> tuple[list[RunVersion], dict[str, RunMetrics]]:
@@ -721,6 +1000,97 @@ def build_snapshot(root: Path) -> tuple[list[RunVersion], dict[str, RunMetrics]]
     return updated_runs, metrics_cache
 
 
+def run_selector_items(runs: list[RunVersion]) -> list[SelectorItem]:
+    items: list[SelectorItem] = []
+    for model, group_runs in group_runs_by_model(runs):
+        keys = tuple(str(run.metrics_csv_path) for run in group_runs)
+        statuses = "/".join(sorted({run.status for run in group_runs}))
+        labels = [run_display_name(run) for run in group_runs]
+        items.append(
+            SelectorItem(
+                f"model:{model}",
+                f"{model}  {statuses}",
+                " ".join([model, *labels, *[run.display_name for run in group_runs], *keys]),
+                keys,
+            )
+        )
+        for run in group_runs:
+            key = str(run.metrics_csv_path)
+            version = run_version_label(run)
+            search_text = f"{model} {version} {run_display_name(run)} {run.display_name} {key}"
+            items.append(SelectorItem(key, f"  {version}  {run.status}", search_text))
+    return items
+
+
+def config_items(runs: list[RunVersion]) -> list[ConfigItem]:
+    config_runs = [run for run in runs if run.config_yaml_path is not None]
+    items: list[ConfigItem] = []
+    for model, group_runs in group_runs_by_model(config_runs):
+        search_text = " ".join(
+            [
+                model,
+                *[run_display_name(run) for run in group_runs],
+                *[run.display_name for run in group_runs],
+                *[str(run.metrics_csv_path) for run in group_runs],
+            ]
+        )
+        items.append(ConfigItem(f"model:{model}", model, tuple(group_runs), search_text))
+        for run in group_runs:
+            search_text = f"{run_display_name(run)} {run.display_name} {run.metrics_csv_path}"
+            items.append(ConfigItem(str(run.metrics_csv_path), f"  {run_version_label(run)}", (run,), search_text))
+    return items
+
+
+def group_runs_by_model(runs: list[RunVersion]) -> list[tuple[str, list[RunVersion]]]:
+    groups: list[tuple[str, list[RunVersion]]] = []
+    by_model: dict[str, list[RunVersion]] = {}
+    for run in runs:
+        model = run_model_name(run)
+        if model not in by_model:
+            by_model[model] = []
+            groups.append((model, by_model[model]))
+        by_model[model].append(run)
+    return groups
+
+
+def run_model_name(run: RunVersion) -> str:
+    return run.parent_name or abbreviate_version(run.display_name)
+
+
+def run_version_label(run: RunVersion) -> str:
+    return abbreviate_version(run.version_name or run.display_name)
+
+
+def run_display_name(run: RunVersion) -> str:
+    model = run_model_name(run)
+    version = run_version_label(run)
+    return f"{model}/{version}" if run.parent_name else version
+
+
+def abbreviate_version(value: str) -> str:
+    return "/".join(abbreviate_version_part(part) for part in value.split("/"))
+
+
+def abbreviate_version_part(value: str) -> str:
+    prefix = "version_"
+    if value.startswith(prefix) and value[len(prefix):].isdigit():
+        return f"v{value[len(prefix):]}"
+    return value
+
+
+def config_preview_text(runs: tuple[RunVersion, ...]) -> str:
+    sections: list[str] = []
+    for run in runs:
+        if run.config_yaml_path is None:
+            continue
+        try:
+            text = run.config_yaml_path.read_text(errors="replace")
+        except OSError as exc:
+            text = f"Could not read {run.config_yaml_path}\n\n{exc}"
+        sections.append(f"# {run_display_name(run)}\n# {run.config_yaml_path}\n\n{text}")
+    return "\n\n---\n\n".join(sections) if sections else "No config selected."
+
+
 def onoff(value: bool) -> str:
     return "on" if value else "off"
 
@@ -729,24 +1099,109 @@ def theme_name(dark_mode: bool) -> str:
     return "dark" if dark_mode else "light"
 
 
-def keybinding_bar() -> Text:
+def header_bar(runs: Text, config_count: int, metric_count: int) -> Text:
+    text = label_value_segment("runs", runs)
+    text.append("\n")
+    text.append(label_value_segment("configs", Text(str(config_count), style="bold")))
+    text.append("\n")
+    text.append(label_value_segment("metrics", Text(str(metric_count), style="bold")))
+    return text
+
+
+def label_value_segment(label: str, value: Text) -> Text:
+    text = Text()
+    text.append(label, style="bold cyan")
+    text.append(": ", style="dim")
+    text.append(value)
+    return text
+
+
+def widget_width(widget: Static) -> int:
+    return max(widget.size.width - 2, 1)
+
+
+def keybinding_bar(page_indicator: str | None = None, width: int | None = None) -> Text:
     items = (
-        ("m", "metrics"),
         ("r", "runs"),
         ("c", "configs"),
+        ("m", "metrics"),
         ("n/p", "metric"),
         ("a", "axis"),
-        ("d", "theme"),
         ("s", "smooth"),
         ("x/y", "log"),
-        ("sp", "pause"),
-        ("R", "scan"),
+        ("sp", "multi"),
+        ("enter", "focus"),
+        ("esc", "clear"),
+        ("d", "theme"),
         ("q", "quit"),
     )
+    segments: list[Text] = []
+    for key, label in items:
+        segment = Text()
+        segment.append(f" {key} ", style="bold reverse")
+        segment.append(f" {label}")
+        segments.append(segment)
+    if page_indicator:
+        segments.append(Text(page_indicator, style="bold"))
+    return distributed_bar(segments, width)
+
+
+def distributed_bar(segments: list[Text], width: int | None = None) -> Text:
+    if width is None or minimum_width(segments) <= width:
+        return distributed_row(segments, width)
+
     text = Text()
-    for index, (key, label) in enumerate(items):
-        if index:
-            text.append("  ", style="dim")
-        text.append(f" {key} ", style="bold reverse")
-        text.append(f" {label}")
+    for row_index, row in enumerate(split_segments(segments)):
+        if row_index:
+            text.append("\n")
+        text.append(distributed_row(row, width))
     return text
+
+
+def distributed_row(segments: list[Text], width: int | None = None) -> Text:
+    text = Text()
+    if not segments:
+        return text
+
+    gaps = len(segments) - 1
+    spaces = gap_sizes(segments, width) if gaps else ()
+    for index, segment in enumerate(segments):
+        if index:
+            text.append(" " * spaces[index - 1], style="dim")
+        text.append(segment.copy())
+    return text
+
+
+def gap_sizes(segments: list[Text], width: int | None) -> tuple[int, ...]:
+    gaps = len(segments) - 1
+    if not gaps:
+        return ()
+    if width is None:
+        return tuple(2 for _ in range(gaps))
+
+    content_width = sum(text_width(segment) for segment in segments)
+    available = max(width - content_width, gaps * 2)
+    base = available // gaps
+    remainder = available % gaps
+    return tuple(base + (1 if index < remainder else 0) for index in range(gaps))
+
+
+def split_segments(segments: list[Text]) -> list[list[Text]]:
+    if len(segments) <= 1:
+        return [segments]
+
+    split_index = min(
+        range(1, len(segments)),
+        key=lambda index: abs(minimum_width(segments[:index]) - minimum_width(segments[index:])),
+    )
+    return [segments[:split_index], segments[split_index:]]
+
+
+def minimum_width(segments: list[Text]) -> int:
+    if not segments:
+        return 0
+    return sum(text_width(segment) for segment in segments) + (len(segments) - 1) * 2
+
+
+def text_width(text: Text) -> int:
+    return len(text.plain)

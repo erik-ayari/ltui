@@ -1,37 +1,26 @@
 # ltui
 
 [![PyPI](https://img.shields.io/pypi/v/ltui.svg)](https://pypi.org/project/ltui/)
-[![CI](https://github.com/erik-ayari/ltui/actions/workflows/ci.yml/badge.svg)](https://github.com/erik-ayari/ltui/actions/workflows/ci.yml)
 
 TensorBoard-like live monitoring for PyTorch Lightning `CSVLogger` metrics, directly in the terminal.
 
 `ltui` turns Lightning `metrics.csv` files into a focused terminal plot for live monitoring, inspection, and run comparison, similar in spirit to tools like TensorBoard. Because it runs entirely in the terminal, it is especially useful for headless monitoring on remote machines over SSH, inside tmux, and without a browser or server process.
 
-## Showcase
-
 <table>
   <tr>
     <td width="50%">
-      <img src="https://raw.githubusercontent.com/erik-ayari/ltui/main/docs/screenshots/loss-log-scale.png" alt="Log-scaled train and validation loss plot in ltui">
-      <br>
-      <sub><b>Live loss monitoring</b>: train and validation loss in one terminal plot, with log scaling enabled.</sub>
+      <img src="docs/screenshots/multiplot.png" alt="Multiplot grid in ltui" width="100%">
     </td>
     <td width="50%">
-      <img src="https://raw.githubusercontent.com/erik-ayari/ltui/main/docs/screenshots/loss-log-scale-comparison.png" alt="Log-scaled comparison of two runs in ltui">
-      <br>
-      <sub><b>Run comparison</b>: multiple Lightning versions overlaid on an epoch axis with separate run and train/val legends.</sub>
+      <img src="docs/screenshots/loss-log-scale-comparison.png" alt="Run comparison plot in ltui" width="100%">
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="https://raw.githubusercontent.com/erik-ayari/ltui/main/docs/screenshots/metric-selector.png" alt="Metric selector in ltui">
-      <br>
-      <sub><b>Metric selection</b>: fuzzy, keyboard-first selection over grouped train/validation metric families.</sub>
+      <img src="docs/screenshots/metric-selector.png" alt="Metric selector in ltui" width="100%">
     </td>
     <td width="50%">
-      <img src="https://raw.githubusercontent.com/erik-ayari/ltui/main/docs/screenshots/config-viewer.png" alt="YAML config viewer in ltui">
-      <br>
-      <sub><b>Config inspection</b>: inspect the YAML config associated with a selected Lightning run without leaving the terminal.</sub>
+      <img src="docs/screenshots/config-viewer.png" alt="YAML config viewer in ltui" width="100%">
     </td>
   </tr>
 </table>
@@ -40,6 +29,7 @@ TensorBoard-like live monitoring for PyTorch Lightning `CSVLogger` metrics, dire
 
 - Live in-terminal visualization of PyTorch Lightning training metrics
 - Automatic train/validation metric grouping in one plot
+- Multiplot mode for viewing several selected metrics at once
 - Multi-run comparison with readable run legends
 - Step and epoch x-axis modes with Lightning-friendly alignment
 - Log scaling and EMA smoothing for noisy or wide-range metrics
@@ -110,13 +100,14 @@ When the x-axis is `step`, validation epoch metrics use the `step` value from th
 
 | Key | Action |
 | --- | --- |
-| `m` | Open metric selector |
 | `r` | Open run/version selector |
 | `c` | Open config viewer for runs with a unique YAML config |
+| `m` | Open metric selector |
 | `/` | Fuzzy search inside selector |
-| `arrow keys` | Navigate selector |
-| `space` | Toggle selection in selector, pause/resume on main screen |
-| `enter` | Apply selector |
+| `arrow keys` | Navigate selector or selected plot in multiplot mode; left/right jump between models in run/config selectors |
+| `space` | Toggle selection in selector, open multiplot on main screen |
+| `enter` | Apply selector, focus selected plot in multiplot mode |
+| `escape` | Clear plot selection in multiplot mode |
 | `n` | Next selected metric/family |
 | `p` | Previous selected metric/family |
 | `a` | Toggle x-axis between step and epoch |
@@ -124,18 +115,4 @@ When the x-axis is `step`, validation epoch metrics use the `step` value from th
 | `s` | Toggle smoothing |
 | `x` | Toggle log-x |
 | `y` | Toggle log-y |
-| `R` | Force rescan |
 | `q` | Quit |
-
-## Plot Behavior
-
-- Preferred x-axis: `step`
-- Fallback x-axis: `epoch`
-- Final fallback: row index
-- Step and epoch axes start at `0`
-- Numeric metric columns are plotted, excluding `step` and `epoch`
-- Rows with `NaN` for the selected metric are dropped
-- Points are sorted by x-axis before plotting
-- Smoothing is EMA with alpha `0.2`
-- Log scaling drops nonpositive points and reports the count
-- UI state is stored per root under `~/.local/state/ltui/`
