@@ -135,7 +135,7 @@ def render_plot(
             plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="braille")
     legend_entries = draw_legend_entries(prepared, bounds, dark_mode) if show_legend else []
 
-    text = color_active_run_labels(plt.build(), legend_entries)
+    text = color_active_run_labels(plt.build(), legend_entries, "\033[38;5;3m" if dark_mode else "\033[39m")
     return PlotResult(text=text, status_messages=tuple(messages))
 
 
@@ -419,8 +419,8 @@ def run_legend_entries(curves: list[PlotCurve]) -> list[LegendEntry]:
     return entries
 
 
-def color_active_run_labels(text: str, entries: list[LegendEntry]) -> str:
+def color_active_run_labels(text: str, entries: list[LegendEntry], restore_color: str = "\033[39m") -> str:
     for entry in entries:
         if entry.active:
-            text = text.replace(entry.label, f"\033[38;5;10m{entry.label}\033[39m", 1)
+            text = text.replace(entry.label, f"\033[38;5;10m{entry.label}{restore_color}", 1)
     return text

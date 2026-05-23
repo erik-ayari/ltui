@@ -115,9 +115,9 @@ def test_custom_legend_entries_use_run_colors_then_neutral_styles() -> None:
 def test_active_run_labels_are_colored_green_after_render() -> None:
     text = "run_a run_b run_a"
 
-    colored = color_active_run_labels(text, [LegendEntry("run_a", "blue", True), LegendEntry("run_b", "red", False)])
+    colored = color_active_run_labels(text, [LegendEntry("run_a", "blue", True), LegendEntry("run_b", "red", False)], "\033[38;5;3m")
 
-    assert colored == "\033[38;5;10mrun_a\033[39m run_b run_a"
+    assert colored == "\033[38;5;10mrun_a\033[38;5;3m run_b run_a"
 
 
 def test_single_run_still_gets_run_legend_entry() -> None:
