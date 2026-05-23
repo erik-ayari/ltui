@@ -9,8 +9,10 @@ from ltui.plotting import (
     PlotPanel,
     color_active_run_labels,
     draw_legend_entries,
+    format_log_tick,
     grid_layout,
     integer_ticks,
+    log_ticks,
     plot_val,
     prepare_curve,
     render_plot_grid,
@@ -49,6 +51,24 @@ def test_render_plot_uses_integer_step_ticks() -> None:
     ticks, labels = xticks.call_args.args
     assert ticks == [0, 10, 20, 30, 40, 50]
     assert labels == ["0", "10", "20", "30", "40", "50"]
+
+
+def test_render_plot_uses_power_labels_for_log_y() -> None:
+    curve = PlotCurve(label="loss", x=(0.0, 1.0), y=(0.1, 10.0))
+
+    with patch("ltui.plotting.plt.yticks") as yticks:
+        render_plot([curve], width=60, height=20, log_y=True)
+
+    ticks, labels = yticks.call_args.args
+    assert ticks == [-1.0, -0.5, 0.0, 0.5, 1.0]
+    assert labels == ["10⁻¹", "10⁻⁰·⁵", "10⁰", "10⁰·⁵", "10¹"]
+
+
+def test_log_ticks_format_exponents_as_powers() -> None:
+    ticks, labels = log_ticks(-2.1, 1.1, target_count=5)
+
+    assert ticks == [-2, -1, 0, 1]
+    assert labels == [format_log_tick(tick) for tick in ticks]
 
 
 def test_integer_ticks_are_discrete_for_small_epoch_range() -> None:

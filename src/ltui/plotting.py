@@ -71,6 +71,7 @@ class LegendEntry:
 
 
 ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
+superscript_digits = str.maketrans("-0123456789.", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹·")
 
 
 def render_plot(
@@ -119,14 +120,20 @@ def render_plot(
     if title:
         plt.title(title)
     if x_label:
-        plt.xlabel(f"log10({x_label})" if log_x else x_label)
+        plt.xlabel(x_label)
     if y_label:
-        plt.ylabel(f"log10({y_label})" if log_y else y_label)
+        plt.ylabel(y_label)
     plt.xlim(left=bounds.x_left, right=bounds.x_right)
     plt.ylim(lower=bounds.y_lower, upper=bounds.y_upper)
-    if x_label in {"step", "epoch"} and not log_x:
+    if log_x:
+        ticks, labels = log_ticks(bounds.x_left, bounds.x_right)
+        plt.xticks(ticks, labels)
+    elif x_label in {"step", "epoch"}:
         ticks = integer_ticks(bounds.x_left, bounds.x_right)
         plt.xticks(ticks, [str(tick) for tick in ticks])
+    if log_y:
+        ticks, labels = log_ticks(bounds.y_lower, bounds.y_upper)
+        plt.yticks(ticks, labels)
 
     for curve in prepared:
         if curve.role == "val":
@@ -387,6 +394,46 @@ def nice_integer_step(minimum: int) -> int:
         if step >= minimum:
             return step
     return 10 * magnitude
+
+
+def log_ticks(left: float, right: float, target_count: int = 6) -> tuple[list[float], list[str]]:
+    if right < left:
+        left, right = right, left
+    span = right - left
+    if span <= 0 or not math.isfinite(span):
+        ticks = [round(left, 10)]
+        return ticks, [format_log_tick(ticks[0])]
+
+    step = nice_log_step(span / max(target_count - 1, 1))
+    first = math.ceil(left / step) * step
+    last = math.floor(right / step) * step
+    ticks: list[float] = []
+    value = first
+    while value <= last + step * 0.1:
+        ticks.append(round(value, 10))
+        value += step
+    if not ticks:
+        ticks = [round((left + right) / 2, 10)]
+    return ticks, [format_log_tick(tick) for tick in ticks]
+
+
+def nice_log_step(minimum: float) -> float:
+    if minimum <= 0 or not math.isfinite(minimum):
+        return 1.0
+    magnitude = 10 ** math.floor(math.log10(minimum))
+    for factor in (1, 2, 5, 10):
+        step = factor * magnitude
+        if step >= minimum:
+            return step
+    return 10 * magnitude
+
+
+def format_log_tick(exponent: float) -> str:
+    if math.isclose(exponent, round(exponent), abs_tol=1e-9):
+        text = str(int(round(exponent)))
+    else:
+        text = f"{exponent:.2f}".rstrip("0").rstrip(".")
+    return f"10{text.translate(superscript_digits)}"
 
 
 def plot_val(curve: PlotCurve) -> None:

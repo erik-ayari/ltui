@@ -486,10 +486,12 @@ class LightningTuiApp(App[None]):
     ) -> None:
         self.runs = runs
         self.metrics_cache = metrics_cache
+        restore_multiplot = False
         if not runs:
             self.selected_run_paths = []
             self.selected_metrics = []
             self.active_metric_index = 0
+            self.multiplot = False
             return
 
         if initial:
@@ -509,6 +511,7 @@ class LightningTuiApp(App[None]):
                 self.selected_metrics = list(restored.selected_metrics)
                 if restored.active_metric in self.selected_metrics:
                     self.active_metric_index = self.selected_metrics.index(restored.active_metric)
+                restore_multiplot = restored.multiplot
 
         self.selected_run_paths = [path for path in self.selected_run_paths if path in self.metrics_cache]
         if not self.selected_run_paths:
@@ -522,6 +525,11 @@ class LightningTuiApp(App[None]):
         if self.active_metric_index >= len(self.selected_metrics):
             self.active_metric_index = 0
         self.metric_settings = {metric: settings for metric, settings in self.metric_settings.items() if metric in self.selected_metrics}
+        if initial:
+            self.multiplot = restore_multiplot and bool(self.selected_metrics)
+            if not self.multiplot:
+                self.multiplot_selection = None
+                self.multiplot_page = 0
         self.clamp_multiplot_selection()
 
     def render_current(self) -> None:
@@ -802,6 +810,7 @@ class LightningTuiApp(App[None]):
                 smoothing=self.smoothing,
                 log_x=self.log_x,
                 log_y=self.log_y,
+                multiplot=self.multiplot,
             ),
         )
 

@@ -12,6 +12,7 @@ from ltui.app import (
     keybinding_bar,
 )
 from ltui.plotting import PlotResult
+from ltui.state import UiState
 
 
 def write_multimetric_log(path: Path) -> None:
@@ -334,6 +335,29 @@ def test_space_opens_multiplot_grid() -> None:
 
                 assert app.multiplot is True
                 assert app.multiplot_selection is None
+
+    asyncio.run(run())
+
+
+def test_initial_state_restores_multiplot_view() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics = root / "lightning_logs" / "version_0" / "metrics.csv"
+            write_multimetric_log(metrics)
+            saved = UiState(
+                selected_run_paths=(str(metrics.resolve()),),
+                selected_metrics=("loss", "accuracy"),
+                active_metric="loss",
+                multiplot=True,
+            )
+
+            with patch("ltui.app.load_state", return_value=saved):
+                app = LightningTuiApp(root)
+                async with app.run_test(size=(120, 40)) as pilot:
+                    await pilot.pause(0.5)
+
+                    assert app.multiplot is True
 
     asyncio.run(run())
 

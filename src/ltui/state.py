@@ -23,6 +23,7 @@ class UiState:
     smoothing: bool = False
     log_x: bool = False
     log_y: bool = False
+    multiplot: bool = False
 
 
 def state_path(root: str | Path) -> Path:
@@ -59,6 +60,7 @@ def load_state(root: str | Path) -> UiState | None:
         smoothing=bool(data.get("smoothing", False)),
         log_x=bool(data.get("log_x", False)),
         log_y=bool(data.get("log_y", False)),
+        multiplot=bool(data.get("multiplot", False)),
     )
 
 
@@ -88,6 +90,7 @@ def valid_state(saved: UiState, runs: list[RunVersion], metric_choices: tuple[st
         smoothing=saved.smoothing,
         log_x=saved.log_x,
         log_y=saved.log_y,
+        multiplot=saved.multiplot and bool(selected_metrics),
     )
 
 
