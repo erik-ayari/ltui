@@ -1,6 +1,14 @@
 import json
 
-from ltui.lightning import StructuredMetricWriter
+from ltui.lightning import LtuiLogger, StructuredMetricWriter
+
+
+def test_ltui_logger_exposes_read_only_lightning_paths(tmp_path):
+    logger = LtuiLogger(save_dir=tmp_path, name="stage1")
+
+    assert logger.save_dir == str(tmp_path.resolve())
+    assert logger.log_dir == tmp_path.resolve() / "stage1" / "version_0"
+    assert logger.experiment.log_dir == logger.log_dir
 
 
 def test_structured_metric_writer_records_manifest_and_series(tmp_path):

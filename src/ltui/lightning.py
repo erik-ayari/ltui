@@ -150,9 +150,9 @@ class LtuiLogger(LightningLogger):
         val_prefix: str = "val",
     ) -> None:
         super().__init__()
-        self.save_dir = Path(save_dir).expanduser().resolve()
+        self.save_dir_path = Path(save_dir).expanduser().resolve()
         self.name_value = name
-        self.version_value = resolve_version(self.save_dir / name, version)
+        self.version_value = resolve_version(self.save_dir_path / name, version)
         self.writer = StructuredMetricWriter(
             self.log_dir,
             separator=separator,
@@ -169,8 +169,12 @@ class LtuiLogger(LightningLogger):
         return self.version_value
 
     @property
+    def save_dir(self) -> str:
+        return str(self.save_dir_path)
+
+    @property
     def log_dir(self) -> Path:
-        return self.save_dir / self.name_value / self.version_value
+        return self.save_dir_path / self.name_value / self.version_value
 
     @property
     def experiment(self) -> StructuredMetricWriter:
