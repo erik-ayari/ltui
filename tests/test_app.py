@@ -471,6 +471,34 @@ def test_multiplot_right_moves_to_next_page() -> None:
     asyncio.run(run())
 
 
+def test_multiplot_next_previous_keys_change_pages_without_selecting_plot() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            metrics = root / "lightning_logs" / "version_0" / "metrics.csv"
+            write_multimetric_log(metrics)
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(80, 25)) as pilot:
+                await pilot.pause(0.5)
+                app.selected_metrics = ["loss", "accuracy", "kl"]
+                await pilot.press("space")
+                await pilot.press("n")
+                await pilot.pause(0.1)
+
+                assert app.multiplot_page == 1
+                assert app.multiplot_selection is None
+                assert app.active_metric() == "loss"
+
+                await pilot.press("p")
+                await pilot.pause(0.1)
+
+                assert app.multiplot_page == 0
+                assert app.multiplot_selection is None
+
+    asyncio.run(run())
+
+
 def test_header_has_three_rows_without_plot_status_fields() -> None:
     async def run() -> None:
         with TemporaryDirectory() as tmp:
@@ -564,10 +592,12 @@ def test_app_does_not_pass_redundant_y_axis_label_to_plot() -> None:
 
 def test_footer_starts_with_runs_configs_metrics_and_keeps_theme_near_quit() -> None:
     text = keybinding_bar().plain
+    multiplot = keybinding_bar(multiplot=True).plain
 
     assert text.index("runs") < text.index("configs") < text.index("metrics")
     assert text.index("theme") < text.index("quit")
     assert text.index("theme") > text.index("clear")
+    assert "page" in multiplot
 
 
 def test_footer_distributes_available_space_and_falls_back_to_two_rows() -> None:

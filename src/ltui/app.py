@@ -661,7 +661,7 @@ class LightningTuiApp(App[None]):
 
     def update_footer(self) -> None:
         footer = self.query_one("#footer", Static)
-        footer.update(keybinding_bar(self.page_indicator(), widget_width(footer)))
+        footer.update(keybinding_bar(self.page_indicator(), widget_width(footer), self.multiplot))
 
     def page_indicator(self) -> str | None:
         if not self.multiplot or self.multiplot_layout.page_count <= 1:
@@ -862,11 +862,17 @@ class LightningTuiApp(App[None]):
         self.render_current()
 
     def action_next_metric(self) -> None:
+        if self.multiplot:
+            self.move_multiplot_page(1)
+            return
         if self.selected_metrics:
             self.active_metric_index = (self.active_metric_index + 1) % len(self.selected_metrics)
             self.render_current()
 
     def action_previous_metric(self) -> None:
+        if self.multiplot:
+            self.move_multiplot_page(-1)
+            return
         if self.selected_metrics:
             self.active_metric_index = (self.active_metric_index - 1) % len(self.selected_metrics)
             self.render_current()
@@ -986,6 +992,21 @@ class LightningTuiApp(App[None]):
 
         self.multiplot_selection = min(max(next_index, 0), len(self.selected_metrics) - 1)
         self.multiplot_page = self.multiplot_selection // max(page_size, 1)
+        self.render_current()
+
+    def move_multiplot_page(self, delta: int) -> None:
+        if not self.multiplot or self.multiplot_layout.page_count <= 1:
+            return
+
+        page_size = max(self.multiplot_layout.page_size, 1)
+        current_page = self.multiplot_page
+        next_page = (current_page + delta) % self.multiplot_layout.page_count
+        if self.multiplot_selection is not None:
+            local = self.multiplot_selection - current_page * page_size
+            page_start = next_page * page_size
+            page_end = min(page_start + page_size, len(self.selected_metrics))
+            self.multiplot_selection = min(page_start + max(local, 0), page_end - 1)
+        self.multiplot_page = next_page
         self.render_current()
 
     def clamp_multiplot_selection(self) -> None:
@@ -1181,12 +1202,12 @@ def widget_width(widget: Static) -> int:
     return max(widget.size.width - 2, 1)
 
 
-def keybinding_bar(page_indicator: str | None = None, width: int | None = None) -> Text:
+def keybinding_bar(page_indicator: str | None = None, width: int | None = None, multiplot: bool = False) -> Text:
     items = (
         ("r", "runs"),
         ("c", "configs"),
         ("m", "metrics"),
-        ("n/p", "metric"),
+        ("n/p", "page" if multiplot else "metric"),
         ("a", "axis"),
         ("s", "smooth"),
         ("x/y", "log"),
