@@ -90,3 +90,42 @@ def test_resolve_family_handles_missing_train_or_val(tmp_path: Path) -> None:
     metrics = load_run_metrics(path)
 
     assert resolve_family(metrics, "loss") == (("val_loss", "val"),)
+
+
+def test_loads_structured_manifest_metrics(tmp_path: Path) -> None:
+    train = tmp_path / "series" / "train" / "loss" / "kl.csv"
+    val = tmp_path / "series" / "val" / "loss" / "kl.csv"
+    train.parent.mkdir(parents=True)
+    val.parent.mkdir(parents=True)
+    train.write_text("step,epoch,wall_time,value\n1,0,10,0.9\n")
+    val.write_text("step,epoch,wall_time,value\n2,0,11,0.8\n")
+    manifest = tmp_path / "ltui_manifest.json"
+    manifest.write_text(
+        """
+{
+  "schema_version": 1,
+  "series": [
+    {
+      "name": "train/loss/kl",
+      "role": "train",
+      "metric_path": ["loss", "kl"],
+      "path": "series/train/loss/kl.csv"
+    },
+    {
+      "name": "val/loss/kl",
+      "role": "val",
+      "metric_path": ["loss", "kl"],
+      "path": "series/val/loss/kl.csv"
+    }
+  ]
+}
+""",
+    )
+
+    metrics = load_run_metrics(manifest)
+
+    assert metrics.metric_names == ("loss/kl",)
+    assert resolve_family(metrics, "loss/kl") == (("train/loss/kl", "train"), ("val/loss/kl", "val"))
+    series = metric_series(metrics, "val/loss/kl", STEP_COLUMN)
+    assert series.x == (2.0,)
+    assert series.y == (0.8,)

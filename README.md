@@ -44,9 +44,15 @@ TensorBoard-like live monitoring for PyTorch Lightning `CSVLogger` metrics, dire
 pip install ltui
 ```
 
+The TUI itself does not require PyTorch Lightning. To install the optional Lightning logger dependency in a training environment:
+
+```bash
+pip install "ltui[logger]"
+```
+
 ## Quick Start
 
-Point `ltui` at any directory containing Lightning CSV logs:
+Point `ltui` at any directory containing Lightning logs:
 
 ```bash
 ltui /path/to/log/root
@@ -60,11 +66,14 @@ ltui /data/experiments/my_model
 ltui ~/runs/my_experiment
 ```
 
-On startup, `ltui` recursively discovers `metrics.csv` files, selects the latest modified run, and chooses a loss metric when one is available.
+On startup, `ltui` recursively discovers native Lightning `metrics.csv` files and ltui logger manifests, selects the latest modified run, and chooses a loss metric when one is available.
 
 ## What It Reads
 
-`ltui` targets PyTorch Lightning `CSVLogger` output. Each discovered `metrics.csv` is treated as one selectable run/version.
+`ltui` reads two simple file-based formats:
+
+- PyTorch Lightning `CSVLogger` output, where each discovered `metrics.csv` is one selectable run/version.
+- The optional `LtuiLogger` format, where each discovered `ltui_manifest.json` describes one run/version with one small CSV file per metric series.
 
 Supported layouts include:
 
@@ -73,6 +82,7 @@ lightning_logs/version_0/metrics.csv
 run_a/version_0/metrics.csv
 run_a/lightning_logs/version_0/metrics.csv
 experiments/group_1/run_a/lightning_logs/version_3/metrics.csv
+ltui_logs/version_0/ltui_manifest.json
 ```
 
 Display names are derived from paths relative to the scanned root.
@@ -97,6 +107,82 @@ train_kl + val_kl -> kl
 Lightning step/epoch suffixes are handled as part of the same family, so `train_loss_step`, `train_loss_epoch`, and `val_loss` appear as `loss`.
 
 When the x-axis is `step`, validation epoch metrics use the `step` value from their CSV row. This places validation points at the training step where validation was logged.
+
+## LtuiLogger
+
+`LtuiLogger` is an optional PyTorch Lightning logger that writes a manifest plus per-metric CSV files. The format is still plain files, so it is easy to copy from remote machines, inspect with shell tools, and load with pandas.
+
+```python
+from lightning.pytorch import Trainer
+from ltui.lightning import LtuiLogger
+
+logger = LtuiLogger(
+    save_dir="outputs",
+    name="stage1",
+)
+
+trainer = Trainer(logger=logger)
+```
+
+Log metrics with path-style names:
+
+```python
+self.log("train/loss/kl", train_kl)
+self.log("val/loss/kl", val_kl)
+self.log("train/loss/recon", train_recon)
+self.log("val/loss/recon", val_recon)
+self.log("train/density/mu", train_mu)
+self.log("val/density/mu", val_mu)
+```
+
+The first path node is the train/validation role. The last node is the plotted metric. Intermediate nodes define the metric hierarchy shown in the `m` selector. For the example above, the selector shows `loss` with `kl` and `recon`, and `density` with `mu`.
+
+Nodes can also be metrics and groups at the same time:
+
+```python
+self.log("train/pose_head/loss", pose_loss)
+self.log("train/pose_head/loss/orientation_cosine_error", orientation_error)
+```
+
+The metric selector displays this as:
+
+```text
+pose_head
+  loss  [metric]
+    orientation_cosine_error
+```
+
+Prefixes and separators are configurable:
+
+```python
+logger = LtuiLogger(
+    save_dir="outputs",
+    train_prefix="fit",
+    val_prefix="valid",
+    separator="/",
+)
+
+self.log("fit/loss/kl", train_kl)
+self.log("valid/loss/kl", val_kl)
+```
+
+The logger writes:
+
+```text
+stage1/version_0/
+  ltui_manifest.json
+  series/
+    train/loss/kl.csv
+    val/loss/kl.csv
+```
+
+Each series CSV has a narrow schema:
+
+```csv
+step,epoch,wall_time,value
+0,0,1780000000.1,1.23
+100,0,1780000002.4,0.97
+```
 
 ## Controls
 

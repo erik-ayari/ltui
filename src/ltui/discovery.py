@@ -7,6 +7,9 @@ from typing import Literal
 
 
 RunStatus = Literal["active", "stale", "finished"]
+CSVLOGGER_FORMAT = "csvlogger"
+LTUI_FORMAT = "ltui"
+LTUI_MANIFEST = "ltui_manifest.json"
 
 
 @dataclass(frozen=True)
@@ -19,6 +22,7 @@ class RunVersion:
     last_modified: float
     status: RunStatus
     available_numeric_metrics: tuple[str, ...] = ()
+    logger_format: str = CSVLOGGER_FORMAT
 
 
 def discover_runs(
@@ -33,7 +37,15 @@ def discover_runs(
         now = time.time()
 
     runs: list[RunVersion] = []
-    for metrics_path in sorted(root_path.rglob("metrics.csv")):
+    sources = [(path, LTUI_FORMAT) for path in root_path.rglob(LTUI_MANIFEST)]
+    manifest_dirs = {path.parent for path, logger_format in sources if logger_format == LTUI_FORMAT}
+    sources.extend(
+        (path, CSVLOGGER_FORMAT)
+        for path in root_path.rglob("metrics.csv")
+        if path.parent not in manifest_dirs
+    )
+
+    for metrics_path, logger_format in sorted(sources, key=lambda item: str(item[0])):
         if not metrics_path.is_file():
             continue
         stat = metrics_path.stat()
@@ -47,6 +59,7 @@ def discover_runs(
                 version_name=version_name,
                 last_modified=stat.st_mtime,
                 status=classify_status(now - stat.st_mtime, active_age_seconds, stale_age_seconds),
+                logger_format=logger_format,
             )
         )
     return runs

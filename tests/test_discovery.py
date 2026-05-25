@@ -37,6 +37,31 @@ def test_names_nested_lightning_logs_readably(tmp_path: Path) -> None:
     assert runs[0].parent_name == "run_a"
 
 
+def test_discovers_ltui_manifest_run(tmp_path: Path) -> None:
+    manifest = tmp_path / "run_a" / "version_0" / "ltui_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"schema_version": 1, "series": []}\n')
+
+    runs = discover_runs(tmp_path)
+
+    assert len(runs) == 1
+    assert runs[0].display_name == "run_a/version_0"
+    assert runs[0].metrics_csv_path == manifest.resolve()
+    assert runs[0].logger_format == "ltui"
+
+
+def test_manifest_takes_precedence_over_legacy_metrics_csv_in_same_run(tmp_path: Path) -> None:
+    manifest = tmp_path / "run_a" / "version_0" / "ltui_manifest.json"
+    metrics = tmp_path / "run_a" / "version_0" / "metrics.csv"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"schema_version": 1, "series": []}\n')
+    write_metrics(metrics)
+
+    runs = discover_runs(tmp_path)
+
+    assert [run.metrics_csv_path for run in runs] == [manifest.resolve()]
+
+
 def test_discovers_unique_config_yaml_next_to_metrics(tmp_path: Path) -> None:
     metrics = tmp_path / "version_0" / "metrics.csv"
     write_metrics(metrics)

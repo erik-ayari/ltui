@@ -10,8 +10,10 @@ from ltui.app import (
     LightningTuiApp,
     SelectorScreen,
     keybinding_bar,
+    metric_selector_items,
 )
 from ltui.plotting import PlotResult
+from ltui.lightning import StructuredMetricWriter
 from ltui.state import UiState
 
 
@@ -335,6 +337,38 @@ def test_space_opens_multiplot_grid() -> None:
 
                 assert app.multiplot is True
                 assert app.multiplot_selection is None
+
+    asyncio.run(run())
+
+
+def test_metric_selector_renders_hierarchical_metric_paths() -> None:
+    items = metric_selector_items(("loss/kl", "loss/recon", "pose_head/loss", "pose_head/loss/orientation_cosine_error"))
+
+    labels = [item.label for item in items]
+    assert labels == [
+        "loss",
+        "  kl",
+        "  recon",
+        "pose_head",
+        "  loss  [metric]",
+        "    orientation_cosine_error",
+    ]
+    assert items[4].selection_keys == ("pose_head/loss", "pose_head/loss/orientation_cosine_error")
+
+
+def test_app_builds_curves_from_structured_logger_format() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            writer = StructuredMetricWriter(root / "stage1" / "version_0")
+            writer.log_metrics({"train/loss/kl": 1.0, "val/loss/kl": 0.8, "epoch": 0}, step=10)
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(120, 40)) as pilot:
+                await pilot.pause(0.5)
+
+                assert app.selected_metrics == ["loss/kl"]
+                assert [curve.label for curve in app.build_curves()] == ["train", "val"]
 
     asyncio.run(run())
 

@@ -761,7 +761,7 @@ class LightningTuiApp(App[None]):
         for run_path in self.selected_run_paths:
             metrics = self.metrics_cache.get(run_path)
             if metrics is not None:
-                axis = resolve_x_axis(metrics.frame, settings.x_axis_mode)
+                axis = settings.x_axis_mode if metrics.structured_sources else resolve_x_axis(metrics.frame, settings.x_axis_mode)
                 if axis not in axes:
                     axes.append(axis)
         return axes[0] if len(axes) == 1 else "x"
@@ -816,7 +816,7 @@ class LightningTuiApp(App[None]):
 
     def action_open_metric_selector(self) -> None:
         choices = self.metric_choices_for_runs(self.selected_run_paths)
-        items = [SelectorItem(choice, choice) for choice in choices]
+        items = metric_selector_items(choices)
         self.push_screen(SelectorScreen("Metrics", items, self.selected_metrics), self.apply_metric_selection)
 
     def apply_metric_selection(self, selected: list[str] | None) -> None:
@@ -1007,6 +1007,58 @@ def build_snapshot(root: Path) -> tuple[list[RunVersion], dict[str, RunMetrics]]
         metrics_cache[str(run.metrics_csv_path)] = metrics
         updated_runs.append(replace(run, available_numeric_metrics=metrics.metric_names))
     return updated_runs, metrics_cache
+
+
+class MetricSelectorNode:
+    def __init__(self, name: str, path: tuple[str, ...] = ()) -> None:
+        self.name = name
+        self.path = path
+        self.metric: str | None = None
+        self.children: dict[str, MetricSelectorNode] = {}
+
+
+def metric_selector_items(choices: tuple[str, ...]) -> list[SelectorItem]:
+    if not any("/" in choice for choice in choices):
+        return [SelectorItem(choice, choice) for choice in choices]
+
+    root = MetricSelectorNode("")
+    for choice in choices:
+        node = root
+        parts = tuple(part for part in choice.split("/") if part)
+        for index, part in enumerate(parts):
+            if part not in node.children:
+                node.children[part] = MetricSelectorNode(part, parts[: index + 1])
+            node = node.children[part]
+        node.metric = choice
+
+    items: list[SelectorItem] = []
+    for child in root.children.values():
+        append_metric_selector_items(child, items, 0)
+    return items
+
+
+def append_metric_selector_items(node: MetricSelectorNode, items: list[SelectorItem], depth: int) -> None:
+    subtree = metric_subtree(node)
+    path = "/".join(node.path)
+    if node.children:
+        label = f"{'  ' * depth}{node.name}"
+        if node.metric is not None:
+            label += "  [metric]"
+        items.append(SelectorItem(f"metric-group:{path}", label, " ".join([path, *subtree]), subtree))
+    elif node.metric is not None:
+        items.append(SelectorItem(node.metric, f"{'  ' * depth}{node.name}", node.metric, (node.metric,)))
+
+    for child in node.children.values():
+        append_metric_selector_items(child, items, depth + 1)
+
+
+def metric_subtree(node: MetricSelectorNode) -> tuple[str, ...]:
+    metrics: list[str] = []
+    if node.metric is not None:
+        metrics.append(node.metric)
+    for child in node.children.values():
+        metrics.extend(metric_subtree(child))
+    return tuple(metrics)
 
 
 def run_selector_items(runs: list[RunVersion]) -> list[SelectorItem]:
