@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ltui"
-version = "0.1.3.dev2"
+version = "0.1.3.dev3"
 description = "Terminal UI for PyTorch Lightning CSVLogger metrics."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -50,6 +50,7 @@ dev = [
 ]
 logger = [
   "lightning>=2.0",
+  "pillow>=10.0",
 ]
 
 [project.scripts]

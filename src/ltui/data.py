@@ -47,6 +47,14 @@ class StructuredMetricSource:
 
 
 @dataclass(frozen=True)
+class ImageSource:
+    name: str
+    role: str
+    image_path: tuple[str, ...]
+    directory: Path
+
+
+@dataclass(frozen=True)
 class RunMetrics:
     path: Path
     frame: pd.DataFrame
@@ -54,6 +62,7 @@ class RunMetrics:
     metric_names: tuple[str, ...]
     families: tuple[MetricFamily, ...]
     structured_sources: tuple[StructuredMetricSource, ...] = ()
+    image_sources: tuple[ImageSource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -110,6 +119,7 @@ def load_structured_run_metrics(path: Path) -> RunMetrics:
             )
         )
 
+    image_sources = load_image_sources(manifest, path)
     metric_names = tuple(dict.fromkeys("/".join(source.metric_path) for source in sources))
     families = group_structured_metric_families(sources)
     return RunMetrics(
@@ -119,7 +129,33 @@ def load_structured_run_metrics(path: Path) -> RunMetrics:
         metric_names=metric_names,
         families=families,
         structured_sources=tuple(sources),
+        image_sources=tuple(image_sources),
     )
+
+
+def load_image_sources(manifest: dict, path: Path) -> list[ImageSource]:
+    sources: list[ImageSource] = []
+    for item in manifest.get("images", ()):
+        if not isinstance(item, dict):
+            continue
+        image_path = item.get("image_path")
+        source_path = item.get("path")
+        name = item.get("name")
+        role = item.get("role")
+        if not isinstance(image_path, list) or not isinstance(source_path, str) or not isinstance(name, str) or not isinstance(role, str):
+            continue
+        parts = tuple(str(part) for part in image_path if str(part))
+        if not parts:
+            continue
+        sources.append(
+            ImageSource(
+                name=name,
+                role=role if role in {"train", "val"} else "raw",
+                image_path=parts,
+                directory=(path.parent / source_path).resolve(),
+            )
+        )
+    return sources
 
 
 def group_structured_metric_families(sources: list[StructuredMetricSource]) -> tuple[MetricFamily, ...]:

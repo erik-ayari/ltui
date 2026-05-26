@@ -35,6 +35,7 @@ TensorBoard-like live monitoring for PyTorch Lightning `CSVLogger` metrics, dire
 - Multi-run comparison with readable run legends
 - Step and epoch x-axis modes with Lightning-friendly alignment
 - Log scaling and EMA smoothing for noisy or wide-range metrics
+- Structured image logging with `feh` browsing for generated samples or reconstructions
 - YAML config inspection for runs with associated model/training configs
 - Keyboard-first selectors with fuzzy search
 
@@ -110,7 +111,7 @@ When the x-axis is `step`, validation epoch metrics use the `step` value from th
 
 ## LtuiLogger
 
-`LtuiLogger` is an optional PyTorch Lightning logger that writes a manifest plus per-metric CSV files. The format is still plain files, so it is easy to copy from remote machines, inspect with shell tools, and load with pandas.
+`LtuiLogger` is an optional PyTorch Lightning logger that writes a manifest plus per-metric CSV files and image folders. The format is still plain files, so it is easy to copy from remote machines, inspect with shell tools, and load with pandas.
 
 ```python
 from lightning.pytorch import Trainer
@@ -184,6 +185,31 @@ step,epoch,wall_time,value
 100,0,1780000002.4,0.97
 ```
 
+Images can use the same path-style naming:
+
+```python
+logger.log_image("train/recon/sample", image, step=global_step, epoch=current_epoch)
+logger.log_image("val/recon/sample", image, step=global_step, epoch=current_epoch)
+```
+
+The logger also supports TensorBoard-style image calls through the experiment object:
+
+```python
+logger.experiment.add_image("train/recon/sample", image_tensor, global_step=global_step)
+```
+
+Images are written under the run directory with filenames prefixed by zero-padded step values, so alphabetical order follows training time:
+
+```text
+stage1/version_0/
+  images/
+    train/recon/sample/
+      step_000000000100_epoch_000000000000_time_1780000000123.png
+      step_000000000200_epoch_000000000000_time_1780000002456.png
+```
+
+Press `i` in the TUI to choose an image stream. If multiple selected runs contain that image stream, `ltui` asks which run/version to open. Image viewing launches `feh` on Linux systems where `feh` is installed.
+
 ## Controls
 
 | Key | Action |
@@ -191,13 +217,14 @@ step,epoch,wall_time,value
 | `r` | Open run/version selector |
 | `c` | Open config viewer for runs with a unique YAML config |
 | `m` | Open metric selector |
+| `i` | Open image selector and launch `feh` for the selected image stream |
 | `/` | Fuzzy search inside selector |
 | `arrow keys` | Navigate selector or selected plot in multiplot mode; left/right jump between models in run/config selectors |
 | `space` | Toggle selection in selector, open multiplot on main screen |
 | `enter` | Apply selector, focus selected plot in multiplot mode |
 | `escape` | Clear plot selection in multiplot mode |
-| `n` | Next selected metric/family |
-| `p` | Previous selected metric/family |
+| `n` | Next selected metric/family, or next page in multiplot mode |
+| `p` | Previous selected metric/family, or previous page in multiplot mode |
 | `a` | Toggle x-axis between step and epoch |
 | `d` | Toggle dark/light plot theme |
 | `s` | Toggle smoothing |

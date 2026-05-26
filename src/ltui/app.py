@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -13,13 +15,14 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
 
-from .data import AxisMode, RunMetrics, load_run_metrics, metric_series, resolve_family, resolve_x_axis
+from .data import AxisMode, ImageSource, RunMetrics, load_run_metrics, metric_series, resolve_family, resolve_x_axis
 from .discovery import RunVersion, discover_runs
 from .plotting import GridLayout, PlotCurve, PlotPanel, render_plot, render_plot_grid
 from .state import UiState, load_state, save_state, valid_state
 
 
 PALETTE = ("blue+", "orange+", "cyan+", "magenta+", "green+", "red+", "white", "gray+")
+IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
 
 
 @dataclass(frozen=True)
@@ -301,6 +304,86 @@ class ConfigScreen(ModalScreen[None]):
         return next((item for item in self.items if item.key == key), None)
 
 
+class SingleSelectorItem:
+    def __init__(self, key: str, label: str, search_text: str | None = None, selectable: bool = True) -> None:
+        self.key = key
+        self.label = label
+        self.search_text = search_text or label
+        self.selectable = selectable
+
+
+class SingleSelectorScreen(ModalScreen[str | None]):
+    BINDINGS = [
+        Binding("/", "focus_search", "Search", show=False),
+        Binding("enter", "apply", "Apply", show=False),
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(self, title: str, items: list[SingleSelectorItem]) -> None:
+        super().__init__()
+        self.title = title
+        self.items = items
+        self.search_query = ""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="selector"):
+            yield Static(self.title, id="selector-title")
+            yield Input(placeholder="Search", id="search")
+            yield OptionList(id="options", markup=False)
+            yield Static("/ search  arrows navigate  enter open  escape cancel", id="selector-help")
+
+    def on_mount(self) -> None:
+        self.refresh_options()
+        self.query_one(OptionList).focus()
+
+    def action_focus_search(self) -> None:
+        self.query_one(Input).focus()
+
+    def action_apply(self) -> None:
+        item = self.selected_item()
+        if item is not None and item.selectable:
+            self.dismiss(item.key)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        event.stop()
+        self.action_apply()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "search":
+            return
+        self.search_query = event.value
+        self.refresh_options()
+
+    def refresh_options(self) -> None:
+        option_list = self.query_one(OptionList)
+        option_list.clear_options()
+        option_list.add_options(Option(item.label, id=item.key) for item in self.filtered_items())
+        if option_list.option_count:
+            option_list.highlighted = 0
+
+    def filtered_items(self) -> list[SingleSelectorItem]:
+        if not self.search_query:
+            return self.items
+        scored = [
+            (fuzz.WRatio(self.search_query, item.search_text), index, item)
+            for index, item in enumerate(self.items)
+        ]
+        return [item for score, index, item in sorted(scored, key=lambda value: (-value[0], value[1])) if score >= 35]
+
+    def selected_item(self) -> SingleSelectorItem | None:
+        option_list = self.query_one(OptionList)
+        if option_list.highlighted is None:
+            return None
+        option = option_list.get_option_at_index(option_list.highlighted)
+        if option.id is None:
+            return None
+        key = str(option.id)
+        return next((item for item in self.items if item.key == key), None)
+
+
 class LightningTuiApp(App[None]):
     CSS = """
     Screen {
@@ -334,6 +417,10 @@ class LightningTuiApp(App[None]):
     }
 
     ConfigScreen {
+        align: center middle;
+    }
+
+    SingleSelectorScreen {
         align: center middle;
     }
 
@@ -409,6 +496,7 @@ class LightningTuiApp(App[None]):
 
     BINDINGS = [
         Binding("m", "open_metric_selector", "Metrics"),
+        Binding("i", "open_image_selector", "Images"),
         Binding("r", "open_run_selector", "Runs"),
         Binding("c", "open_config_selector", "Configs"),
         Binding("n", "next_metric", "Next metric"),
@@ -734,6 +822,31 @@ class LightningTuiApp(App[None]):
                     choices.append(name)
         return tuple(choices)
 
+    def image_choices_for_runs(self, run_paths: list[str]) -> tuple[str, ...]:
+        seen: set[str] = set()
+        choices: list[str] = []
+        for run_path in run_paths:
+            metrics = self.metrics_cache.get(run_path)
+            if metrics is None:
+                continue
+            for source in metrics.image_sources:
+                if source.name not in seen:
+                    seen.add(source.name)
+                    choices.append(source.name)
+        return tuple(choices)
+
+    def image_runs_for_choice(self, image_name: str) -> list[tuple[RunVersion, ImageSource]]:
+        candidates: list[tuple[RunVersion, ImageSource]] = []
+        for run_path in self.selected_run_paths:
+            metrics = self.metrics_cache.get(run_path)
+            run = self.run_by_path(run_path)
+            if metrics is None or run is None:
+                continue
+            for source in metrics.image_sources:
+                if source.name == image_name:
+                    candidates.append((run, source))
+        return candidates
+
     def default_metric_choice(self, choices: tuple[str, ...]) -> str:
         raw_metrics = self.raw_metrics_for_selected_runs()
         if self.grouped_mode:
@@ -818,6 +931,69 @@ class LightningTuiApp(App[None]):
         choices = self.metric_choices_for_runs(self.selected_run_paths)
         items = metric_selector_items(choices)
         self.push_screen(SelectorScreen("Metrics", items, self.selected_metrics), self.apply_metric_selection)
+
+    def action_open_image_selector(self) -> None:
+        choices = self.image_choices_for_runs(self.selected_run_paths)
+        if not choices:
+            self.status_message = "no logged images found"
+            self.render_current()
+            return
+        self.push_screen(SingleSelectorScreen("Images", image_selector_items(choices)), self.apply_image_selection)
+
+    def apply_image_selection(self, image_name: str | None) -> None:
+        if image_name is None:
+            return
+        candidates = self.image_runs_for_choice(image_name)
+        if not candidates:
+            self.status_message = f"no images found: {image_name}"
+            self.render_current()
+            return
+        if len(candidates) == 1:
+            run, source = candidates[0]
+            self.open_image_source(run, source)
+            return
+
+        items = [
+            SingleSelectorItem(
+                str(run.metrics_csv_path),
+                run_display_name(run),
+                f"{run_display_name(run)} {run.display_name} {run.metrics_csv_path}",
+            )
+            for run, source in candidates
+        ]
+        self.push_screen(
+            SingleSelectorScreen("Image Run", items),
+            lambda selected: self.apply_image_run_selection(image_name, selected),
+        )
+
+    def apply_image_run_selection(self, image_name: str, run_path: str | None) -> None:
+        if run_path is None:
+            return
+        for run, source in self.image_runs_for_choice(image_name):
+            if str(run.metrics_csv_path) == run_path:
+                self.open_image_source(run, source)
+                return
+        self.status_message = f"no images found: {image_name}"
+        self.render_current()
+
+    def open_image_source(self, run: RunVersion, source: ImageSource) -> None:
+        feh = shutil.which("feh")
+        if feh is None:
+            self.status_message = "feh not found"
+            self.render_current()
+            return
+        if not source.directory.is_dir() or not image_files(source.directory):
+            self.status_message = f"no image files: {source.name}"
+            self.render_current()
+            return
+        subprocess.Popen(
+            [feh, "--sort", "filename", str(source.directory)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        self.status_message = f"opened images: {run_display_name(run)} {source.name}"
+        self.render_current()
 
     def apply_metric_selection(self, selected: list[str] | None) -> None:
         if selected is None:
@@ -1082,6 +1258,49 @@ def metric_subtree(node: MetricSelectorNode) -> tuple[str, ...]:
     return tuple(metrics)
 
 
+def image_selector_items(choices: tuple[str, ...]) -> list[SingleSelectorItem]:
+    if not any("/" in choice for choice in choices):
+        return [SingleSelectorItem(choice, choice) for choice in choices]
+
+    root = MetricSelectorNode("")
+    for choice in choices:
+        node = root
+        parts = tuple(part for part in choice.split("/") if part)
+        for index, part in enumerate(parts):
+            if part not in node.children:
+                node.children[part] = MetricSelectorNode(part, parts[: index + 1])
+            node = node.children[part]
+        node.metric = choice
+
+    items: list[SingleSelectorItem] = []
+    for child in root.children.values():
+        append_image_selector_items(child, items, 0)
+    return items
+
+
+def append_image_selector_items(node: MetricSelectorNode, items: list[SingleSelectorItem], depth: int) -> None:
+    path = "/".join(node.path)
+    if node.children:
+        label = f"{'  ' * depth}{node.name}"
+        if node.metric is not None:
+            label += "  [image]"
+            items.append(SingleSelectorItem(node.metric, label, path))
+        else:
+            items.append(SingleSelectorItem(f"image-group:{path}", label, path, selectable=False))
+    elif node.metric is not None:
+        items.append(SingleSelectorItem(node.metric, f"{'  ' * depth}{node.name}", node.metric))
+
+    for child in node.children.values():
+        append_image_selector_items(child, items, depth + 1)
+
+
+def image_files(directory: Path) -> tuple[Path, ...]:
+    try:
+        return tuple(sorted(path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES))
+    except OSError:
+        return ()
+
+
 def run_selector_items(runs: list[RunVersion]) -> list[SelectorItem]:
     items: list[SelectorItem] = []
     for model, group_runs in group_runs_by_model(runs):
@@ -1207,12 +1426,13 @@ def keybinding_bar(page_indicator: str | None = None, width: int | None = None, 
         ("r", "runs"),
         ("c", "configs"),
         ("m", "metrics"),
+        ("i", "images"),
         ("n/p", "page" if multiplot else "metric"),
         ("a", "axis"),
         ("s", "smooth"),
         ("x/y", "log"),
         ("sp", "multi"),
-        ("enter", "focus"),
+        ("ent", "focus"),
         ("esc", "clear"),
         ("d", "theme"),
         ("q", "quit"),
@@ -1233,7 +1453,7 @@ def distributed_bar(segments: list[Text], width: int | None = None) -> Text:
         return distributed_row(segments, width)
 
     text = Text()
-    for row_index, row in enumerate(split_segments(segments)):
+    for row_index, row in enumerate(split_segments(segments, width)):
         if row_index:
             text.append("\n")
         text.append(distributed_row(row, width))
@@ -1268,12 +1488,20 @@ def gap_sizes(segments: list[Text], width: int | None) -> tuple[int, ...]:
     return tuple(base + (1 if index < remainder else 0) for index in range(gaps))
 
 
-def split_segments(segments: list[Text]) -> list[list[Text]]:
+def split_segments(segments: list[Text], width: int | None = None) -> list[list[Text]]:
     if len(segments) <= 1:
         return [segments]
 
+    indices = range(1, len(segments))
+    if width is not None:
+        fitting_indices = [
+            index for index in indices
+            if minimum_width(segments[:index]) <= width and minimum_width(segments[index:]) <= width
+        ]
+        indices = fitting_indices or range(1, len(segments))
+
     split_index = min(
-        range(1, len(segments)),
+        indices,
         key=lambda index: abs(minimum_width(segments[:index]) - minimum_width(segments[index:])),
     )
     return [segments[:split_index], segments[split_index:]]

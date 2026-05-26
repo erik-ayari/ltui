@@ -129,3 +129,34 @@ def test_loads_structured_manifest_metrics(tmp_path: Path) -> None:
     series = metric_series(metrics, "val/loss/kl", STEP_COLUMN)
     assert series.x == (2.0,)
     assert series.y == (0.8,)
+
+
+def test_loads_structured_manifest_images(tmp_path: Path) -> None:
+    directory = tmp_path / "images" / "train" / "recon" / "sample"
+    directory.mkdir(parents=True)
+    manifest = tmp_path / "ltui_manifest.json"
+    manifest.write_text(
+        """
+{
+  "schema_version": 1,
+  "images": [
+    {
+      "name": "train/recon/sample",
+      "role": "train",
+      "image_path": ["recon", "sample"],
+      "path": "images/train/recon/sample"
+    }
+  ],
+  "series": []
+}
+""",
+    )
+
+    metrics = load_run_metrics(manifest)
+
+    assert len(metrics.image_sources) == 1
+    source = metrics.image_sources[0]
+    assert source.name == "train/recon/sample"
+    assert source.role == "train"
+    assert source.image_path == ("recon", "sample")
+    assert source.directory == directory.resolve()

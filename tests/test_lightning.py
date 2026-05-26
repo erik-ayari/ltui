@@ -3,6 +3,12 @@ import json
 from ltui.lightning import LtuiLogger, StructuredMetricWriter
 
 
+PNG_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000a49444154789c6360000002000150a0f53a0000000049454e44ae426082"
+)
+
+
 def test_ltui_logger_exposes_read_only_lightning_paths(tmp_path):
     logger = LtuiLogger(save_dir=tmp_path, name="stage1")
 
@@ -51,6 +57,24 @@ def test_structured_metric_writer_supports_prefix_style_roles(tmp_path):
     assert by_name["train_loss"]["metric_path"] == ["loss"]
     assert by_name["val_loss/kl"]["role"] == "val"
     assert by_name["val_loss/kl"]["metric_path"] == ["loss", "kl"]
+
+
+def test_structured_metric_writer_records_images_in_step_order(tmp_path):
+    writer = StructuredMetricWriter(tmp_path)
+
+    writer.log_image("train/recon/sample", PNG_BYTES, step=10, epoch=1, wall_time=10)
+    writer.log_image("train/recon/sample", PNG_BYTES, step=2, epoch=0, wall_time=2)
+
+    manifest = json.loads((tmp_path / "ltui_manifest.json").read_text())
+    image = manifest["images"][0]
+    assert image["name"] == "train/recon/sample"
+    assert image["role"] == "train"
+    assert image["image_path"] == ["recon", "sample"]
+    assert image["path"] == "images/train/recon/sample"
+
+    names = sorted(path.name for path in (tmp_path / image["path"]).iterdir())
+    assert names[0].startswith("step_000000000002")
+    assert names[1].startswith("step_000000000010")
 
 
 def test_structured_metric_writer_supports_custom_prefix_style_roles(tmp_path):

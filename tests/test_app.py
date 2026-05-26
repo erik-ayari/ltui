@@ -9,12 +9,20 @@ from ltui.app import (
     ConfigScreen,
     LightningTuiApp,
     SelectorScreen,
+    SingleSelectorScreen,
+    image_selector_items,
     keybinding_bar,
     metric_selector_items,
 )
 from ltui.plotting import PlotResult
 from ltui.lightning import StructuredMetricWriter
 from ltui.state import UiState
+
+
+PNG_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000a49444154789c6360000002000150a0f53a0000000049454e44ae426082"
+)
 
 
 def write_multimetric_log(path: Path) -> None:
@@ -42,6 +50,69 @@ def test_metric_selector_opens_without_shadowing_textual_query() -> None:
                 await pilot.pause(0.1)
 
                 assert isinstance(app.screen, SelectorScreen)
+
+    asyncio.run(run())
+
+
+def test_image_selector_opens_for_structured_logger_images() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            writer = StructuredMetricWriter(root / "stage1" / "version_0")
+            writer.log_image("train/recon/sample", PNG_BYTES, step=1)
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(100, 35)) as pilot:
+                await pilot.pause(0.5)
+                await pilot.press("i")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, SingleSelectorScreen)
+
+    asyncio.run(run())
+
+
+def test_image_selection_asks_for_run_when_multiple_selected_runs_have_image() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "stage1" / "version_0"
+            second = root / "stage1" / "version_1"
+            StructuredMetricWriter(first).log_image("train/recon/sample", PNG_BYTES, step=1)
+            StructuredMetricWriter(second).log_image("train/recon/sample", PNG_BYTES, step=1)
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(100, 35)) as pilot:
+                await pilot.pause(0.5)
+                app.selected_run_paths = [
+                    str((first / "ltui_manifest.json").resolve()),
+                    str((second / "ltui_manifest.json").resolve()),
+                ]
+                app.apply_image_selection("train/recon/sample")
+                await pilot.pause(0.1)
+
+                assert isinstance(app.screen, SingleSelectorScreen)
+                assert app.screen.title == "Image Run"
+
+    asyncio.run(run())
+
+
+def test_image_selection_launches_feh_on_image_folder() -> None:
+    async def run() -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            writer = StructuredMetricWriter(root / "stage1" / "version_0")
+            writer.log_image("train/recon/sample", PNG_BYTES, step=1)
+
+            app = LightningTuiApp(root)
+            async with app.run_test(size=(100, 35)) as pilot:
+                await pilot.pause(0.5)
+                with patch("ltui.app.shutil.which", return_value="/usr/bin/feh"), patch("ltui.app.subprocess.Popen") as popen:
+                    app.apply_image_selection("train/recon/sample")
+                    await pilot.pause(0.1)
+
+                assert popen.call_args.args[0][:3] == ["/usr/bin/feh", "--sort", "filename"]
+                assert popen.call_args.kwargs["start_new_session"] is True
 
     asyncio.run(run())
 
@@ -356,6 +427,23 @@ def test_metric_selector_renders_hierarchical_metric_paths() -> None:
     assert items[4].selection_keys == ("pose_head/loss", "pose_head/loss/orientation_cosine_error")
 
 
+def test_image_selector_renders_hierarchical_image_paths_without_toggles() -> None:
+    items = image_selector_items(("train/recon/sample", "train/recon/error", "val/recon/sample"))
+
+    labels = [item.label for item in items]
+    assert labels == [
+        "train",
+        "  recon",
+        "    sample",
+        "    error",
+        "val",
+        "  recon",
+        "    sample",
+    ]
+    assert items[0].selectable is False
+    assert items[2].key == "train/recon/sample"
+
+
 def test_app_builds_curves_from_structured_logger_format() -> None:
     async def run() -> None:
         with TemporaryDirectory() as tmp:
@@ -595,6 +683,7 @@ def test_footer_starts_with_runs_configs_metrics_and_keeps_theme_near_quit() -> 
     multiplot = keybinding_bar(multiplot=True).plain
 
     assert text.index("runs") < text.index("configs") < text.index("metrics")
+    assert text.index("metrics") < text.index("images") < text.index("axis")
     assert text.index("theme") < text.index("quit")
     assert text.index("theme") > text.index("clear")
     assert "page" in multiplot
