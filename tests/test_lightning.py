@@ -73,8 +73,24 @@ def test_structured_metric_writer_records_images_in_step_order(tmp_path):
     assert image["path"] == "images/train/recon/sample"
 
     names = sorted(path.name for path in (tmp_path / image["path"]).iterdir())
-    assert names[0].startswith("step_000000000002")
-    assert names[1].startswith("step_000000000010")
+    assert names == [
+        "step_02_epoch_0.png",
+        "step_10_epoch_1.png",
+    ]
+
+
+def test_structured_metric_writer_expands_image_name_widths(tmp_path):
+    writer = StructuredMetricWriter(tmp_path)
+
+    writer.log_image("train/recon/sample", PNG_BYTES, step=9, epoch=0)
+    writer.log_image("train/recon/sample", PNG_BYTES, step=10, epoch=0)
+
+    manifest = json.loads((tmp_path / "ltui_manifest.json").read_text())
+    path = tmp_path / manifest["images"][0]["path"]
+    assert sorted(item.name for item in path.iterdir()) == [
+        "step_09_epoch_0.png",
+        "step_10_epoch_0.png",
+    ]
 
 
 def test_structured_metric_writer_supports_custom_prefix_style_roles(tmp_path):

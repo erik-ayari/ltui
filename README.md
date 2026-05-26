@@ -204,8 +204,8 @@ Images are written under the run directory with filenames prefixed by zero-padde
 stage1/version_0/
   images/
     train/recon/sample/
-      step_000000000100_epoch_000000000000_time_1780000000123.png
-      step_000000000200_epoch_000000000000_time_1780000002456.png
+      step_100_epoch_0.png
+      step_200_epoch_0.png
 ```
 
 Press `i` in the TUI to choose an image stream. If multiple selected runs contain that image stream, `ltui` asks which run/version to open. Image viewing launches `feh` on Linux systems where `feh` is installed.

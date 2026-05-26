@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 import csv
+from dataclasses import dataclass
 import hashlib
 import json
 import math
@@ -90,11 +91,10 @@ class StructuredMetricWriter:
     ) -> Path:
         resolved_step = scalar(step)
         resolved_epoch = scalar(epoch)
-        resolved_wall_time = time.time() if wall_time is None else wall_time
         entry = self.image_entry(name)
         directory = self.log_dir / entry["path"]
         directory.mkdir(parents=True, exist_ok=True)
-        path = next_image_path(directory, resolved_step, resolved_epoch, resolved_wall_time, image_extension(image, extension))
+        path = next_image_path(directory, resolved_step, resolved_epoch, image_extension(image, extension))
         write_image_file(image, path, dataformats)
         self.save_manifest()
         return path
@@ -325,8 +325,27 @@ def empty_if_none(value: float | None) -> float | str:
     return "" if value is None else value
 
 
-def next_image_path(directory: Path, step: float | None, epoch: float | None, wall_time: float, extension: str) -> Path:
-    stem = f"{sort_part('step', step)}_{sort_part('epoch', epoch)}_time_{int(wall_time * 1000):013d}"
+@dataclass(frozen=True)
+class ImageFileName:
+    step: float | None
+    epoch: float | None
+    index: int | None
+    extension: str
+
+
+IMAGE_FILE_RE = re.compile(
+    r"^step_(?P<step>none|neg\d+(?:\.\d+)?|\d+(?:\.\d+)?)_"
+    r"epoch_(?P<epoch>none|neg\d+(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"(?:_time_\d+)?"
+    r"(?:_(?P<index>\d{4}))?"
+    r"\.(?P<extension>[A-Za-z0-9]+)$"
+)
+
+
+def next_image_path(directory: Path, step: float | None, epoch: float | None, extension: str) -> Path:
+    step_width, epoch_width = image_name_widths(directory, step, epoch)
+    normalize_image_names(directory, step_width, epoch_width)
+    stem = image_stem(step, epoch, step_width, epoch_width)
     path = directory / f"{stem}.{extension}"
     index = 1
     while path.exists():
@@ -335,12 +354,91 @@ def next_image_path(directory: Path, step: float | None, epoch: float | None, wa
     return path
 
 
-def sort_part(label: str, value: float | None) -> str:
+def image_name_widths(directory: Path, step: float | None, epoch: float | None) -> tuple[int, int]:
+    step_width = value_width(step)
+    epoch_width = value_width(epoch)
+    for path in directory.iterdir():
+        parsed = parse_image_file_name(path.name)
+        if parsed is None:
+            continue
+        step_width = max(step_width, value_width(parsed.step))
+        epoch_width = max(epoch_width, value_width(parsed.epoch))
+    return step_width, epoch_width
+
+
+def normalize_image_names(directory: Path, step_width: int, epoch_width: int) -> None:
+    paths = sorted(path for path in directory.iterdir() if path.is_file())
+    used = {path.name for path in paths if parse_image_file_name(path.name) is None}
+    renames: list[tuple[Path, Path]] = []
+    for path in paths:
+        parsed = parse_image_file_name(path.name)
+        if parsed is None:
+            continue
+        stem = image_stem(parsed.step, parsed.epoch, step_width, epoch_width)
+        target_name = image_file_name(stem, parsed.extension, parsed.index, used)
+        used.add(target_name)
+        target = path.with_name(target_name)
+        if target != path:
+            renames.append((path, target))
+
+    temporary: list[tuple[Path, Path]] = []
+    for index, (source, target) in enumerate(renames):
+        temp = source.with_name(f".ltui-renaming-{index}-{source.name}")
+        source.rename(temp)
+        temporary.append((temp, target))
+    for source, target in temporary:
+        source.rename(target)
+
+
+def image_file_name(stem: str, extension: str, index: int | None, used: set[str]) -> str:
+    next_index = index
+    while True:
+        suffix = "" if next_index is None else f"_{next_index:04d}"
+        name = f"{stem}{suffix}.{extension}"
+        if name not in used:
+            return name
+        next_index = 1 if next_index is None else next_index + 1
+
+
+def image_stem(step: float | None, epoch: float | None, step_width: int, epoch_width: int) -> str:
+    return f"{sort_part('step', step, step_width)}_{sort_part('epoch', epoch, epoch_width)}"
+
+
+def parse_image_file_name(name: str) -> ImageFileName | None:
+    match = IMAGE_FILE_RE.match(name)
+    if match is None:
+        return None
+    index = match.group("index")
+    return ImageFileName(
+        step=parse_sort_value(match.group("step")),
+        epoch=parse_sort_value(match.group("epoch")),
+        index=int(index) if index is not None else None,
+        extension=match.group("extension"),
+    )
+
+
+def parse_sort_value(value: str) -> float | None:
+    if value == "none":
+        return None
+    if value.startswith("neg"):
+        return -float(value[3:])
+    return float(value)
+
+
+def value_width(value: float | None) -> int:
+    if value is None or not float(value).is_integer():
+        return 1
+    return max(1, len(str(abs(int(value)))))
+
+
+def sort_part(label: str, value: float | None, width: int) -> str:
     if value is None:
         return f"{label}_none"
     if float(value).is_integer():
-        return f"{label}_{int(value):012d}"
-    return f"{label}_{value:020.6f}".replace("-", "neg")
+        number = int(value)
+        prefix = "neg" if number < 0 else ""
+        return f"{label}_{prefix}{abs(number):0{width}d}"
+    return f"{label}_{value:.6f}".rstrip("0").rstrip(".").replace("-", "neg")
 
 
 def image_extension(image: Any, extension: str) -> str:
