@@ -388,19 +388,21 @@ class LightningTuiApp(App[None]):
     CSS = """
     Screen {
         layout: vertical;
-        background: $surface;
+        background: black;
+        color: white;
     }
 
     #header {
         height: 3;
         padding: 0 1;
-        background: $surface;
+        background: black;
+        color: white;
     }
 
     #plot {
         height: 1fr;
         padding: 0 1;
-        background: $surface;
+        background: black;
     }
 
     #footer {
@@ -408,8 +410,8 @@ class LightningTuiApp(App[None]):
         min-height: 1;
         max-height: 2;
         padding: 0 1;
-        background: $surface;
-        color: $text-muted;
+        background: black;
+        color: gray;
     }
 
     SelectorScreen {
@@ -427,40 +429,50 @@ class LightningTuiApp(App[None]):
     #selector {
         width: 82%;
         height: 82%;
-        border: solid $accent;
-        background: $panel;
+        border: solid gray;
+        background: black;
+        color: white;
     }
 
     #selector-title {
         height: 1;
         padding: 0 1;
+        color: white;
+        text-style: bold;
     }
 
     #search {
         margin: 0 1;
+        background: black;
+        color: white;
     }
 
     #options {
         height: 1fr;
         margin: 0 1;
+        background: black;
+        color: white;
     }
 
     #selector-help {
         height: 1;
         padding: 0 1;
-        color: $text-muted;
+        color: gray;
     }
 
     #config-viewer {
         width: 88%;
         height: 86%;
-        border: solid $accent;
-        background: $panel;
+        border: solid gray;
+        background: black;
+        color: white;
     }
 
     #config-title {
         height: 1;
         padding: 0 1;
+        color: white;
+        text-style: bold;
     }
 
     #config-body {
@@ -475,22 +487,28 @@ class LightningTuiApp(App[None]):
 
     #config-search {
         height: 3;
+        background: black;
+        color: white;
     }
 
     #config-options {
         height: 1fr;
+        background: black;
+        color: white;
     }
 
     #config-preview {
         width: 1fr;
         height: 1fr;
-        border-left: solid $primary;
+        border-left: solid gray;
+        background: black;
+        color: white;
     }
 
     #config-help {
         height: 1;
         padding: 0 1;
-        color: $text-muted;
+        color: gray;
     }
     """
 
@@ -1411,8 +1429,8 @@ def header_bar(runs: Text, config_count: int, metric_count: int) -> Text:
 
 def label_value_segment(label: str, value: Text) -> Text:
     text = Text()
-    text.append(label, style="bold cyan")
-    text.append(": ", style="dim")
+    text.append(label, style="bold")
+    text.append(": ", style="dim white")
     text.append(value)
     return text
 
@@ -1440,11 +1458,13 @@ def keybinding_bar(page_indicator: str | None = None, width: int | None = None, 
     segments: list[Text] = []
     for key, label in items:
         segment = Text()
-        segment.append(f" {key} ", style="bold reverse")
+        segment.append("[", style="dim")
+        segment.append(key, style="bold")
+        segment.append("]", style="dim")
         segment.append(f" {label}")
         segments.append(segment)
     if page_indicator:
-        segments.append(Text(page_indicator, style="bold"))
+        segments.append(Text(page_indicator, style="white"))
     return distributed_bar(segments, width)
 
 

@@ -72,6 +72,8 @@ class LegendEntry:
 
 ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
 superscript_digits = str.maketrans("-0123456789.", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹·")
+DARK_PLOT_TEXT_COLOR = "green"
+DARK_PLOT_TEXT_ANSI = "\033[38;5;2m"
 
 
 def render_plot(
@@ -114,7 +116,7 @@ def render_plot(
 
     bounds = plot_bounds(prepared, x_min=None if log_x else x_min)
     plt.clear_figure()
-    plt.theme("dark" if dark_mode else "default")
+    apply_plot_theme(dark_mode)
     plt.plotsize(max(width, 30), max(height, 8))
     plt.grid(True, True)
     if title:
@@ -142,8 +144,16 @@ def render_plot(
             plt.plot(curve.x, curve.y, label=None, color=curve.color, marker="braille")
     legend_entries = draw_legend_entries(prepared, bounds, dark_mode) if show_legend else []
 
-    text = color_active_run_labels(plt.build(), legend_entries, "\033[38;5;3m" if dark_mode else "\033[39m")
+    text = color_active_run_labels(plt.build(), legend_entries, DARK_PLOT_TEXT_ANSI if dark_mode else "\033[39m")
     return PlotResult(text=text, status_messages=tuple(messages))
+
+
+def apply_plot_theme(dark_mode: bool) -> None:
+    if dark_mode:
+        plt.theme("clear")
+        plt.ticks_color(DARK_PLOT_TEXT_COLOR)
+    else:
+        plt.theme("default")
 
 
 def render_plot_grid(
@@ -245,7 +255,7 @@ def frame_cell(text: str, width: int, height: int, selected: bool) -> list[str]:
     if not selected:
         return [fit_plain("", width)] + [f" {line} " for line in lines] + [fit_plain("", width)]
 
-    accent = "\033[38;5;214m"
+    accent = "\033[38;5;245m"
     reset = "\033[39m"
     top = f"{accent}┌{'─' * inner_width}┐{reset}"
     bottom = f"{accent}└{'─' * inner_width}┘{reset}"

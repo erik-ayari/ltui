@@ -75,14 +75,15 @@ def test_integer_ticks_are_discrete_for_small_epoch_range() -> None:
     assert integer_ticks(0, 3.2) == [0, 1, 2, 3]
 
 
-def test_render_plot_sets_title_and_dark_theme() -> None:
+def test_render_plot_sets_title_and_terminal_dark_theme() -> None:
     curve = PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))
 
-    with patch("ltui.plotting.plt.title") as title, patch("ltui.plotting.plt.theme") as theme:
+    with patch("ltui.plotting.plt.title") as title, patch("ltui.plotting.plt.theme") as theme, patch("ltui.plotting.plt.ticks_color") as ticks_color:
         render_plot([curve], width=60, height=20, title="loss", dark_mode=True)
 
     title.assert_called_once_with("loss")
-    theme.assert_called_once_with("dark")
+    theme.assert_called_once_with("clear")
+    ticks_color.assert_called_once_with("green")
 
 
 def test_render_plot_can_use_light_theme() -> None:
