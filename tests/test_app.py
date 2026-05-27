@@ -12,6 +12,7 @@ from ltui.app import (
     SingleSelectorScreen,
     image_selector_items,
     keybinding_bar,
+    metric_plot_titles,
     metric_selector_items,
 )
 from ltui.plotting import PlotResult
@@ -425,6 +426,15 @@ def test_metric_selector_renders_hierarchical_metric_paths() -> None:
         "    orientation_cosine_error",
     ]
     assert items[4].selection_keys == ("pose_head/loss", "pose_head/loss/orientation_cosine_error")
+
+
+def test_structured_metric_plot_titles_use_parent_group_and_leaf() -> None:
+    assert metric_plot_titles("loss/kl") == ("loss", "kl")
+    assert metric_plot_titles("pose_head/loss/orientation_cosine_error") == (
+        "pose_head/loss",
+        "orientation_cosine_error",
+    )
+    assert metric_plot_titles("accuracy") == ("", "accuracy")
 
 
 def test_image_selector_renders_hierarchical_image_paths_without_toggles() -> None:

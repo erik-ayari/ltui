@@ -17,7 +17,7 @@ from textual.widgets.option_list import Option
 
 from .data import AxisMode, ImageSource, RunMetrics, load_run_metrics, metric_series, resolve_family, resolve_x_axis
 from .discovery import RunVersion, discover_runs
-from .plotting import GridLayout, PlotCurve, PlotPanel, render_plot, render_plot_grid
+from .plotting import GridLayout, GridPage, PlotCurve, PlotPanel, render_plot, render_plot_grid
 from .state import UiState, load_state, save_state, valid_state
 
 
@@ -708,10 +708,12 @@ class LightningTuiApp(App[None]):
     def plot_panel(self, metric: str) -> PlotPanel:
         settings = self.settings_for_metric(metric)
         x_axis = self.current_x_axis(settings)
+        group_title, title = metric_plot_titles(metric)
         return PlotPanel(
-            title=metric,
+            title=title,
             curves=self.build_curves(metric, settings),
             x_label=x_axis,
+            group_title=group_title,
             smoothing=settings.smoothing,
             log_x=settings.log_x,
             log_y=settings.log_y,
@@ -1165,8 +1167,12 @@ class LightningTuiApp(App[None]):
             return
         self.clamp_multiplot_selection()
         if self.multiplot_selection is None:
-            self.multiplot_selection = self.multiplot_page * self.multiplot_layout.page_size
+            self.multiplot_selection = self.first_index_on_multiplot_page()
             self.render_current()
+            return
+
+        if self.multiplot_layout.pages:
+            self.move_grouped_multiplot_selection(row_delta, column_delta)
             return
 
         columns = self.multiplot_layout.columns
@@ -1188,8 +1194,46 @@ class LightningTuiApp(App[None]):
         self.multiplot_page = self.multiplot_selection // max(page_size, 1)
         self.render_current()
 
+    def move_grouped_multiplot_selection(self, row_delta: int, column_delta: int) -> None:
+        page = self.multiplot_layout.pages[self.multiplot_page]
+        positions = multiplot_positions(page)
+        current = positions.get(self.multiplot_selection)
+        if current is None:
+            self.multiplot_selection = page.panel_indices[0] if page.panel_indices else 0
+            self.render_current()
+            return
+
+        if column_delta:
+            self.multiplot_selection = self.horizontal_multiplot_target(page.panel_indices, column_delta)
+            self.multiplot_page = self.page_for_multiplot_index(self.multiplot_selection)
+            self.render_current()
+            return
+
+        target = vertical_multiplot_target(current, positions, row_delta)
+        if target is not None:
+            self.multiplot_selection = target
+        self.render_current()
+
+    def horizontal_multiplot_target(self, indices: tuple[int, ...], delta: int) -> int:
+        if not indices or self.multiplot_selection is None:
+            return 0
+        local = indices.index(self.multiplot_selection) if self.multiplot_selection in indices else 0
+        next_local = local + delta
+        if 0 <= next_local < len(indices):
+            return indices[next_local]
+        next_page = self.multiplot_page + (1 if delta > 0 else -1)
+        if 0 <= next_page < len(self.multiplot_layout.pages):
+            page_indices = self.multiplot_layout.pages[next_page].panel_indices
+            if page_indices:
+                return page_indices[0 if delta > 0 else -1]
+        return self.multiplot_selection
+
     def move_multiplot_page(self, delta: int) -> None:
         if not self.multiplot or self.multiplot_layout.page_count <= 1:
+            return
+
+        if self.multiplot_layout.pages:
+            self.move_grouped_multiplot_page(delta)
             return
 
         page_size = max(self.multiplot_layout.page_size, 1)
@@ -1203,6 +1247,18 @@ class LightningTuiApp(App[None]):
         self.multiplot_page = next_page
         self.render_current()
 
+    def move_grouped_multiplot_page(self, delta: int) -> None:
+        current_page = self.multiplot_page
+        next_page = (current_page + delta) % self.multiplot_layout.page_count
+        if self.multiplot_selection is not None:
+            current_indices = self.multiplot_layout.pages[current_page].panel_indices
+            next_indices = self.multiplot_layout.pages[next_page].panel_indices
+            local = current_indices.index(self.multiplot_selection) if self.multiplot_selection in current_indices else 0
+            if next_indices:
+                self.multiplot_selection = next_indices[min(local, len(next_indices) - 1)]
+        self.multiplot_page = next_page
+        self.render_current()
+
     def clamp_multiplot_selection(self) -> None:
         if not self.selected_metrics:
             self.multiplot_selection = None
@@ -1210,7 +1266,22 @@ class LightningTuiApp(App[None]):
             return
         if self.multiplot_selection is not None:
             self.multiplot_selection = min(self.multiplot_selection, len(self.selected_metrics) - 1)
+            if self.multiplot_layout.pages:
+                self.multiplot_page = self.page_for_multiplot_index(self.multiplot_selection)
+                return
         self.multiplot_page = min(max(self.multiplot_page, 0), self.multiplot_layout.page_count - 1)
+
+    def first_index_on_multiplot_page(self) -> int:
+        if self.multiplot_layout.pages:
+            indices = self.multiplot_layout.pages[self.multiplot_page].panel_indices
+            return indices[0] if indices else 0
+        return self.multiplot_page * self.multiplot_layout.page_size
+
+    def page_for_multiplot_index(self, index: int) -> int:
+        for page_index, page in enumerate(self.multiplot_layout.pages):
+            if index in page.panel_indices:
+                return page_index
+        return min(max(self.multiplot_page, 0), self.multiplot_layout.page_count - 1)
 
 
 def build_snapshot(root: Path) -> tuple[list[RunVersion], dict[str, RunMetrics]]:
@@ -1230,6 +1301,62 @@ class MetricSelectorNode:
         self.path = path
         self.metric: str | None = None
         self.children: dict[str, MetricSelectorNode] = {}
+
+
+@dataclass(frozen=True)
+class MultiplotPosition:
+    index: int
+    section: int
+    row: int
+    column: int
+    order: int
+
+
+def metric_plot_titles(metric: str) -> tuple[str, str]:
+    parts = tuple(part for part in metric.split("/") if part)
+    if len(parts) <= 1:
+        return "", metric
+    return "/".join(parts[:-1]), parts[-1]
+
+
+def multiplot_positions(page: GridPage) -> dict[int, MultiplotPosition]:
+    positions: dict[int, MultiplotPosition] = {}
+    order = 0
+    for section_index, section in enumerate(page.sections):
+        for local, index in enumerate(section.panel_indices):
+            positions[index] = MultiplotPosition(
+                index=index,
+                section=section_index,
+                row=local // section.columns,
+                column=local % section.columns,
+                order=order,
+            )
+            order += 1
+    return positions
+
+
+def vertical_multiplot_target(
+    current: MultiplotPosition,
+    positions: dict[int, MultiplotPosition],
+    delta: int,
+) -> int | None:
+    if delta == 0:
+        return current.index
+
+    candidates = [
+        position
+        for position in positions.values()
+        if position.section == current.section and position.row == current.row + delta
+    ]
+    if not candidates:
+        candidates = [
+            position
+            for position in positions.values()
+            if (position.order - current.order) * delta > 0
+        ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda position: (abs(position.column - current.column), abs(position.order - current.order))).index
 
 
 def metric_selector_items(choices: tuple[str, ...]) -> list[SelectorItem]:

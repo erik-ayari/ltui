@@ -30,6 +30,7 @@ class PlotPanel:
     title: str
     curves: list[PlotCurve]
     x_label: str
+    group_title: str = ""
     y_label: str = ""
     show_legend: bool = True
     smoothing: bool = False
@@ -40,11 +41,27 @@ class PlotPanel:
 
 
 @dataclass(frozen=True)
+class GridSection:
+    title: str
+    panel_indices: tuple[int, ...]
+    columns: int
+    rows: int
+    height: int
+
+
+@dataclass(frozen=True)
+class GridPage:
+    sections: tuple[GridSection, ...]
+    panel_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class GridLayout:
     columns: int
     rows: int
     page_size: int
     page_count: int
+    pages: tuple[GridPage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -68,6 +85,20 @@ class LegendEntry:
     label: str
     color: str
     active: bool = False
+
+
+@dataclass(frozen=True)
+class PanelGroup:
+    title: str
+    panel_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class SectionLayout:
+    count: int
+    columns: int
+    rows: int
+    height: int
 
 
 ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
@@ -120,7 +151,7 @@ def render_plot(
     plt.plotsize(max(width, 30), max(height, 8))
     plt.grid(True, True)
     if title:
-        plt.title(title)
+        plt.title(compact_label(title, max(width - 8, 1)))
     if x_label:
         plt.xlabel(x_label)
     if y_label:
@@ -157,6 +188,31 @@ def apply_plot_theme(dark_mode: bool) -> None:
 
 
 def render_plot_grid(
+    panels: list[PlotPanel],
+    *,
+    width: int,
+    height: int,
+    page: int = 0,
+    selected_index: int | None = None,
+) -> GridResult:
+    if any(panel.group_title for panel in panels):
+        return render_grouped_plot_grid(
+            panels,
+            width=width,
+            height=height,
+            page=page,
+            selected_index=selected_index,
+        )
+    return render_flat_plot_grid(
+        panels,
+        width=width,
+        height=height,
+        page=page,
+        selected_index=selected_index,
+    )
+
+
+def render_flat_plot_grid(
     panels: list[PlotPanel],
     *,
     width: int,
@@ -207,9 +263,142 @@ def render_plot_grid(
     return GridResult(
         text="\n".join(rows),
         status_messages=tuple(dict.fromkeys(messages)),
+        layout=layout_with_pages(len(panels), layout),
+        page=page,
+    )
+
+
+def render_grouped_plot_grid(
+    panels: list[PlotPanel],
+    *,
+    width: int,
+    height: int,
+    page: int = 0,
+    selected_index: int | None = None,
+) -> GridResult:
+    pages = grouped_grid_pages(panels, width, height)
+    page = min(max(page, 0), len(pages) - 1)
+    current = pages[page]
+    rows: list[str] = []
+    messages: list[str] = []
+    if horizontal_sections(current.sections, width):
+        rows, messages = render_horizontal_grouped_sections(current.sections, panels, width, height, selected_index)
+    else:
+        section_heights = distributed_section_heights(current.sections, height)
+
+        for section_index, section in enumerate(current.sections):
+            if section_index:
+                rows.append("")
+            section_rows, section_messages = render_grouped_section(
+                section,
+                panels,
+                width,
+                section_heights[section_index],
+                selected_index,
+                show_legend=section_index == 0,
+            )
+            rows.extend(section_rows)
+            messages.extend(section_messages)
+
+    layout = GridLayout(
+        columns=layout_columns(current.sections, width),
+        rows=layout_rows(current.sections, width),
+        page_size=max((len(item.panel_indices) for item in pages), default=1),
+        page_count=len(pages),
+        pages=tuple(pages),
+    )
+    return GridResult(
+        text="\n".join(fit_ansi_line(row, width) for row in fit_lines(rows, width, height)),
+        status_messages=tuple(dict.fromkeys(messages)),
         layout=layout,
         page=page,
     )
+
+
+def render_horizontal_grouped_sections(
+    sections: tuple[GridSection, ...],
+    panels: list[PlotPanel],
+    width: int,
+    height: int,
+    selected_index: int | None,
+) -> tuple[list[str], list[str]]:
+    gap = 1
+    section_width = max((width - gap * (len(sections) - 1)) // len(sections), 1)
+    rows_by_section: list[list[str]] = []
+    messages: list[str] = []
+
+    for section_index, section in enumerate(sections):
+        section_rows, section_messages = render_grouped_section(
+            section,
+            panels,
+            section_width,
+            height,
+            selected_index,
+            show_legend=section_index == 0,
+        )
+        rows_by_section.append(fit_lines(section_rows, section_width, height))
+        messages.extend(section_messages)
+
+    rows = [
+        (" " * gap).join(section_rows[line_index] for section_rows in rows_by_section)
+        for line_index in range(height)
+    ]
+    return rows, messages
+
+
+def render_grouped_section(
+    section: GridSection,
+    panels: list[PlotPanel],
+    width: int,
+    height: int,
+    selected_index: int | None,
+    show_legend: bool,
+) -> tuple[list[str], list[str]]:
+    title_height = 1 if section.title else 0
+    gap = 1
+    plot_height = max(height - title_height, 1)
+    cell_width = max((width - gap * (section.columns - 1)) // section.columns, 1)
+    cell_height = max((plot_height - gap * (section.rows - 1)) // section.rows, 1)
+    rows: list[str] = []
+    messages: list[str] = []
+
+    if section.title:
+        dark_mode = panels[section.panel_indices[0]].dark_mode if section.panel_indices else True
+        rows.append(center_title(section.title, width, dark_mode))
+
+    for row in range(section.rows):
+        cells: list[list[str]] = []
+        for column in range(section.columns):
+            local = row * section.columns + column
+            panel_index = section.panel_indices[local] if local < len(section.panel_indices) else None
+            if panel_index is None:
+                cells.append(empty_cell(cell_width, cell_height))
+                continue
+
+            panel = panels[panel_index]
+            rendered = render_plot(
+                panel.curves,
+                width=max(cell_width - 2, 30),
+                height=max(cell_height - 2, 8),
+                title=panel.title,
+                x_label=panel.x_label,
+                y_label=panel.y_label,
+                smoothing=panel.smoothing,
+                log_x=panel.log_x,
+                log_y=panel.log_y,
+                x_min=panel.x_min,
+                dark_mode=panel.dark_mode,
+                show_legend=show_legend and row == 0 and column == 0,
+            )
+            messages.extend(rendered.status_messages)
+            cells.append(frame_cell(rendered.text, cell_width, cell_height, selected_index == panel_index))
+
+        for line_index in range(cell_height):
+            rows.append((" " * gap).join(cell[line_index] for cell in cells))
+        if row < section.rows - 1:
+            rows.extend("" for _ in range(gap))
+
+    return rows, messages
 
 
 def grid_layout(total: int, width: int, height: int) -> GridLayout:
@@ -248,6 +437,187 @@ def grid_layout(total: int, width: int, height: int) -> GridLayout:
     )
 
 
+def layout_with_pages(total: int, layout: GridLayout) -> GridLayout:
+    pages: list[GridPage] = []
+    for start in range(0, max(total, 1), layout.page_size):
+        end = min(start + layout.page_size, total)
+        indices = tuple(range(start, end))
+        section = GridSection("", indices, layout.columns, layout.rows, height=0)
+        pages.append(GridPage((section,), indices))
+    return GridLayout(
+        columns=layout.columns,
+        rows=layout.rows,
+        page_size=layout.page_size,
+        page_count=layout.page_count,
+        pages=tuple(pages),
+    )
+
+
+def grouped_grid_pages(panels: list[PlotPanel], width: int, height: int) -> tuple[GridPage, ...]:
+    pages: list[GridPage] = []
+    sections: list[GridSection] = []
+    used_height = 0
+    groups = panel_groups(panels)
+    group_index = 0
+
+    while group_index < len(groups):
+        horizontal_groups = next_horizontal_groups(groups, group_index, width)
+        if horizontal_groups:
+            if sections:
+                pages.append(grid_page(sections))
+                sections = []
+                used_height = 0
+            pages.append(
+                grid_page(
+                    [
+                        GridSection(group.title, group.panel_indices, 1, 1, height)
+                        for group in horizontal_groups
+                    ]
+                )
+            )
+            group_index += len(horizontal_groups)
+            continue
+
+        group = groups[group_index]
+        remaining = list(group.panel_indices)
+        while remaining:
+            available_height = height - used_height - (1 if sections else 0)
+            layout = section_layout(len(remaining), width, available_height, bool(group.title))
+            if layout is None and sections:
+                pages.append(grid_page(sections))
+                sections = []
+                used_height = 0
+                continue
+            if layout is None:
+                layout = fallback_section_layout(width, height, bool(group.title))
+
+            indices = tuple(remaining[: layout.count])
+            if sections:
+                used_height += 1
+            sections.append(GridSection(group.title, indices, layout.columns, layout.rows, layout.height))
+            used_height += layout.height
+            remaining = remaining[layout.count :]
+            if remaining:
+                pages.append(grid_page(sections))
+                sections = []
+                used_height = 0
+        group_index += 1
+
+    if sections:
+        pages.append(grid_page(sections))
+    if not pages:
+        pages.append(GridPage((), ()))
+    return tuple(pages)
+
+
+def panel_groups(panels: list[PlotPanel]) -> tuple[PanelGroup, ...]:
+    order: list[str] = []
+    grouped: dict[str, list[int]] = {}
+    for index, panel in enumerate(panels):
+        key = panel.group_title
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(index)
+    return tuple(PanelGroup(title, tuple(grouped[title])) for title in order)
+
+
+def grid_page(sections: list[GridSection]) -> GridPage:
+    indices = tuple(index for section in sections for index in section.panel_indices)
+    return GridPage(tuple(sections), indices)
+
+
+def next_horizontal_groups(groups: tuple[PanelGroup, ...], start: int, width: int) -> tuple[PanelGroup, ...]:
+    limit = max_horizontal_sections(width)
+    if limit < 2 or len(groups[start].panel_indices) != 1:
+        return ()
+
+    selected: list[PanelGroup] = []
+    for group in groups[start:]:
+        if len(group.panel_indices) != 1 or len(selected) >= limit:
+            break
+        selected.append(group)
+    return tuple(selected) if len(selected) >= 2 else ()
+
+
+def max_horizontal_sections(width: int) -> int:
+    min_width = 44
+    gap = 1
+    return max(1, (width + gap) // (min_width + gap))
+
+
+def horizontal_sections(sections: tuple[GridSection, ...], width: int) -> bool:
+    return len(sections) >= 2 and all(len(section.panel_indices) == 1 for section in sections) and len(sections) <= max_horizontal_sections(width)
+
+
+def layout_columns(sections: tuple[GridSection, ...], width: int) -> int:
+    if horizontal_sections(sections, width):
+        return sum(section.columns for section in sections)
+    return max((section.columns for section in sections), default=1)
+
+
+def layout_rows(sections: tuple[GridSection, ...], width: int) -> int:
+    if horizontal_sections(sections, width):
+        return max((section.rows for section in sections), default=1)
+    return sum(section.rows for section in sections)
+
+
+def section_layout(total: int, width: int, available_height: int, has_title: bool) -> SectionLayout | None:
+    title_height = 1 if has_title else 0
+    gap = 1
+    min_width = 44
+    min_height = 14
+    usable_height = available_height - title_height
+    if usable_height < min_height:
+        return None
+
+    max_columns = max(1, width // min_width)
+    max_rows = max(1, (usable_height + gap) // (min_height + gap))
+    count = min(total, max_columns * max_rows)
+    best: tuple[float, int, int] | None = None
+
+    for columns in range(1, max_columns + 1):
+        rows = math.ceil(count / columns)
+        if rows > max_rows:
+            continue
+        cell_width = width / columns
+        cell_height = (usable_height - gap * (rows - 1)) / rows
+        shape_score = abs((cell_width / max(cell_height, 1)) - 3.2) * 0.25
+        square_score = abs(columns - rows) * 0.65
+        empty_score = (columns * rows - count) * 0.2
+        score = shape_score + square_score + empty_score
+        if best is None or score < best[0]:
+            best = (score, columns, rows)
+
+    if best is None:
+        return None
+
+    columns = best[1]
+    rows = best[2]
+    section_height = title_height + rows * min_height + gap * (rows - 1)
+    return SectionLayout(count, columns, rows, section_height)
+
+
+def fallback_section_layout(width: int, height: int, has_title: bool) -> SectionLayout:
+    title_height = 1 if has_title else 0
+    plot_height = max(height - title_height, 1)
+    return SectionLayout(1, 1, 1, title_height + plot_height)
+
+
+def distributed_section_heights(sections: tuple[GridSection, ...], height: int) -> tuple[int, ...]:
+    if not sections:
+        return ()
+
+    gap_total = max(len(sections) - 1, 0)
+    base_heights = [section.height for section in sections]
+    extra = max(height - gap_total - sum(base_heights), 0)
+    heights: list[int] = []
+    for index, base in enumerate(base_heights):
+        addition = extra // len(sections) + (1 if index < extra % len(sections) else 0)
+        heights.append(base + addition)
+    return tuple(heights)
+
+
 def frame_cell(text: str, width: int, height: int, selected: bool) -> list[str]:
     inner_width = max(width - 2, 1)
     inner_height = max(height - 2, 1)
@@ -281,7 +651,26 @@ def fit_ansi_line(line: str, width: int) -> str:
 
 
 def fit_plain(line: str, width: int) -> str:
-    return line[:width].ljust(width)
+    return compact_label(line, width).ljust(width)
+
+
+def compact_label(label: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(label) <= width:
+        return label
+    if width <= 3:
+        return "." * width
+    return label[: width - 3] + "..."
+
+
+def center_title(title: str, width: int, dark_mode: bool) -> str:
+    label = compact_label(title, width)
+    left = max((width - len(label)) // 2, 0)
+    right = max(width - len(label) - left, 0)
+    if dark_mode:
+        label = f"{DARK_PLOT_TEXT_ANSI}{label}\033[39m"
+    return " " * left + label + " " * right
 
 
 def visible_length(line: str) -> int:

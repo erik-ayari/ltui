@@ -10,7 +10,7 @@ from . import __version__
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ltui",
-        description="Terminal UI for PyTorch Lightning CSVLogger metrics.",
+        description="Terminal UI for PyTorch Lightning metrics and LtuiLogger runs.",
     )
     parser.add_argument("root", type=Path, help="Log root to scan recursively.")
     parser.add_argument("--version", action="version", version=f"ltui {__version__}")

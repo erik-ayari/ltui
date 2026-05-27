@@ -8,6 +8,7 @@ from ltui.plotting import (
     PlotCurve,
     PlotPanel,
     color_active_run_labels,
+    compact_label,
     draw_legend_entries,
     format_log_tick,
     grid_layout,
@@ -93,6 +94,17 @@ def test_render_plot_can_use_light_theme() -> None:
         render_plot([curve], width=60, height=20, dark_mode=False)
 
     theme.assert_called_once_with("default")
+
+
+def test_render_plot_compacts_long_titles() -> None:
+    curve = PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))
+
+    with patch("ltui.plotting.plt.title") as title:
+        render_plot([curve], width=30, height=20, title="pose_head/loss/orientation_cosine_error")
+
+    rendered_title = title.call_args.args[0]
+    assert rendered_title == compact_label("pose_head/loss/orientation_cosine_error", 22)
+    assert rendered_title.endswith("...")
 
 
 def test_val_curve_uses_connected_dotted_line() -> None:
@@ -200,3 +212,66 @@ def test_render_plot_grid_shows_legend_only_in_top_left_panel() -> None:
         render_plot_grid(panels, width=120, height=40)
 
     assert [call.kwargs["show_legend"] for call in render.call_args_list] == [True, False, False, False]
+
+
+def test_grouped_plot_grid_uses_parent_title_and_leaf_titles() -> None:
+    panels = [
+        PlotPanel(
+            title="kl",
+            group_title="loss",
+            curves=[PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))],
+            x_label="step",
+        ),
+        PlotPanel(
+            title="recon",
+            group_title="loss",
+            curves=[PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))],
+            x_label="step",
+        ),
+    ]
+
+    with patch("ltui.plotting.render_plot") as render:
+        render.return_value.text = "plot"
+        render.return_value.status_messages = ()
+        result = render_plot_grid(panels, width=120, height=40)
+
+    assert "loss" in result.text
+    assert [call.kwargs["title"] for call in render.call_args_list] == ["kl", "recon"]
+    assert result.layout.pages[0].panel_indices == (0, 1)
+
+
+def test_grouped_plot_grid_starts_new_page_to_keep_siblings_together() -> None:
+    panels = [
+        PlotPanel(
+            title=title,
+            group_title=group,
+            curves=[PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))],
+            x_label="step",
+        )
+        for group, title in (("loss", "kl"), ("loss", "recon"), ("density", "mu"), ("density", "var"))
+    ]
+
+    result = render_plot_grid(panels, width=120, height=30)
+
+    assert result.layout.page_count == 2
+    assert result.layout.pages[0].panel_indices == (0, 1)
+    assert result.layout.pages[1].panel_indices == (2, 3)
+
+
+def test_grouped_plot_grid_prefers_side_by_side_single_metric_groups() -> None:
+    panels = [
+        PlotPanel(
+            title=title,
+            group_title=group,
+            curves=[PlotCurve(label="train", x=(0.0, 1.0), y=(1.0, 0.8))],
+            x_label="step",
+        )
+        for group, title in (("loss", "kl"), ("density", "mu"))
+    ]
+
+    result = render_plot_grid(panels, width=120, height=30)
+
+    assert result.layout.page_count == 1
+    assert result.layout.columns == 2
+    assert result.layout.rows == 1
+    assert result.layout.pages[0].panel_indices == (0, 1)
